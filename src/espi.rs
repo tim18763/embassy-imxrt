@@ -142,7 +142,21 @@ pub enum PortConfig {
     },
 
     /// Mailbox Split
-    MailboxSplit,
+    MailboxSplit {
+        /// Port Direction
+        direction: Direction,
+
+        /// Offset from 0 or the selected mapped base for matching
+        /// memory or IO
+        addr: u16,
+
+        /// Word-aligned offset into the RAM
+        offset: u16,
+
+        /// This is the length of the mailbox or mastering area per
+        /// direction.
+        length: Len,
+    },
 
     /// Put Posted/Completion Mem32
     PutPcMem32,
@@ -168,7 +182,7 @@ impl Into<Type> for PortConfig {
             PortConfig::AcpiIndex => Type::AcpiIndex,
             PortConfig::MailboxShared { .. } => Type::MailboxShared,
             PortConfig::MailboxSingle { .. } => Type::MailboxSingle,
-            PortConfig::MailboxSplit => Type::MailboxSplit,
+            PortConfig::MailboxSplit { .. } => Type::MailboxSplit,
             PortConfig::PutPcMem32 => Type::MailboxShared,
             PortConfig::MailboxSplitOOB => Type::MailboxOobSplit,
             PortConfig::SlaveFlash => Type::BusMFlashS,
@@ -553,7 +567,7 @@ impl<'d> Espi<'d> {
                 offset,
                 length,
             } => {
-                self.mailbox(port, direction, addr, offset, length);
+                self.mailbox(port, config.into(), direction, addr, offset, length);
             }
 
             PortConfig::MailboxSingle {
@@ -562,7 +576,16 @@ impl<'d> Espi<'d> {
                 offset,
                 length,
             } => {
-                self.mailbox_single(port, direction, addr, offset, length);
+                self.mailbox(port, config.into(), direction, addr, offset, length);
+            }
+
+            PortConfig::MailboxSplit {
+                direction,
+                addr,
+                offset,
+                length,
+            } => {
+                self.mailbox(port, config.into(), direction, addr, offset, length);
             }
 
             _ => {
@@ -950,65 +973,13 @@ impl Espi<'_> {
             .write(|w| unsafe { w.data().bits(0x44) });
     }
 
-    fn mailbox(&mut self, port: usize, direction: Direction, addr: u16, offset: u16, length: Len) {
+    fn mailbox(&mut self, port: usize, port_type: Type, direction: Direction, addr: u16, offset: u16, length: Len) {
         // Set port type
         self.info
             .regs
             .port(port)
             .cfg()
-            .modify(|_, w| w.type_().mailbox_single());
-
-        // Set port direction
-        self.info
-            .regs
-            .port(port)
-            .cfg()
-            .modify(|_, w| w.direction().variant(direction));
-
-        // Set port interrupt rules
-        self.info.regs.port(port).irulestat().write(|w| {
-            unsafe { w.ustat().bits(0) }
-                .interr()
-                .set_bit()
-                .intrd()
-                .set_bit()
-                .intwr()
-                .set_bit()
-                .intspc0()
-                .set_bit()
-                .intspc1()
-                .set_bit()
-                .intspc2()
-                .set_bit()
-                .intspc3()
-                .set_bit()
-        });
-
-        // Set port mapped address
-        self.info
-            .regs
-            .port(port)
-            .addr()
-            .write(|w| unsafe { w.off().bits(addr) }.base_or_asz().offset_from_0());
-
-        // Set port RAM use
-        self.info
-            .regs
-            .port(port)
-            .ramuse()
-            .write(|w| unsafe { w.off().bits(offset) }.len().variant(length));
-
-        // Enable the port
-        self.info.regs.mctrl().modify(|_, w| w.pena(port as u8).enabled());
-    }
-
-    fn mailbox_single(&mut self, port: usize, direction: Direction, addr: u16, offset: u16, length: Len) {
-        // Set port type
-        self.info
-            .regs
-            .port(port)
-            .cfg()
-            .modify(|_, w| w.type_().mailbox_single());
+            .modify(|_, w| w.type_().variant(port_type));
 
         // Set port direction
         self.info

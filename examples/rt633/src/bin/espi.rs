@@ -50,11 +50,13 @@ async fn main(_spawner: Spawner) {
             status_addr: Some(0x480),
             status_base: Base::OffsetFrom0,
             ports_config: [
-                PortConfig::MailboxShared {
+                PortConfig::MailboxSplit {
                     direction: Direction::BidirectionalUnenforced,
                     addr: 0,
                     offset: 0,
-                    length: Len::Len64,
+                    // RAM use will be 2x length, one half for each
+                    // direction.
+                    length: Len::Len256,
                 },
                 Default::default(),
                 Default::default(),
