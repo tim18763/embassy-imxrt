@@ -199,8 +199,8 @@ impl FlexcommLowLevel for crate::peripherals::FLEXCOMM15 {
     }
 }
 
-macro_rules! declare_into_mode {
-    ($mode:ident) => {
+macro_rules! into_mode {
+    ($mode:ident, $($fc:ident),*) => {
         paste! {
             /// Sealed Mode trait
             trait [<SealedInto $mode:camel>]: FlexcommLowLevel {}
@@ -214,11 +214,7 @@ macro_rules! declare_into_mode {
                 }
             }
         }
-    };
-}
 
-macro_rules! impl_into_mode {
-    ($mode:ident, $($fc:ident),*) => {
 	$(
 	    paste!{
 		impl [<SealedInto $mode:camel>] for crate::peripherals::$fc {}
@@ -228,21 +224,13 @@ macro_rules! impl_into_mode {
     }
 }
 
-declare_into_mode!(usart);
-impl_into_mode!(usart, FLEXCOMM0, FLEXCOMM1, FLEXCOMM2, FLEXCOMM3, FLEXCOMM4, FLEXCOMM5, FLEXCOMM6, FLEXCOMM7);
+into_mode!(usart, FLEXCOMM0, FLEXCOMM1, FLEXCOMM2, FLEXCOMM3, FLEXCOMM4, FLEXCOMM5, FLEXCOMM6, FLEXCOMM7);
 
-declare_into_mode!(spi);
-impl_into_mode!(
-    spi, FLEXCOMM0, FLEXCOMM1, FLEXCOMM2, FLEXCOMM3, FLEXCOMM4, FLEXCOMM5, FLEXCOMM6, FLEXCOMM7, FLEXCOMM14
-);
+into_mode!(spi, FLEXCOMM0, FLEXCOMM1, FLEXCOMM2, FLEXCOMM3, FLEXCOMM4, FLEXCOMM5, FLEXCOMM6, FLEXCOMM7, FLEXCOMM14);
 
-declare_into_mode!(i2c);
-impl_into_mode!(
-    i2c, FLEXCOMM0, FLEXCOMM1, FLEXCOMM2, FLEXCOMM3, FLEXCOMM4, FLEXCOMM5, FLEXCOMM6, FLEXCOMM7, FLEXCOMM15
-);
+into_mode!(i2c, FLEXCOMM0, FLEXCOMM1, FLEXCOMM2, FLEXCOMM3, FLEXCOMM4, FLEXCOMM5, FLEXCOMM6, FLEXCOMM7, FLEXCOMM15);
 
-declare_into_mode!(i2s_transmit);
-impl_into_mode!(
+into_mode!(
     i2s_transmit,
     FLEXCOMM0,
     FLEXCOMM1,
@@ -254,8 +242,7 @@ impl_into_mode!(
     FLEXCOMM7
 );
 
-declare_into_mode!(i2s_receive);
-impl_into_mode!(
+into_mode!(
     i2s_receive,
     FLEXCOMM0,
     FLEXCOMM1,
