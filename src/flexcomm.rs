@@ -86,15 +86,17 @@ macro_rules! impl_flexcomm {
 			    Clock::FcnFrgSfro => w.sel().fcn_frg_clk(),
 			    Clock::FcnFrgFfro => w.sel().fcn_frg_clk(),
 			    Clock::None => w.sel().none(), // no clock? throw an error?
-            });
+			});
+
 			clkctl1.flexcomm($idx).frgclksel().write(|w| match clk {
 			    Clock::FcnFrgMain => w.sel().main_clk(),
 			    Clock::FcnFrgPll => w.sel().frg_pll_clk(),
 			    Clock::FcnFrgSfro => w.sel().sfro_clk(),
 			    Clock::FcnFrgFfro => w.sel().ffro_clk(),
-				_ => w.sel().none(),    // not using frg ...
+			    _ => w.sel().none(),    // not using frg ...
 			});
-            // todo: add support for frg div/mult
+
+			// todo: add support for frg div/mult
 			clkctl1
 			    .flexcomm($idx)
 			    .frgctl()
@@ -138,6 +140,7 @@ impl FlexcommLowLevel for crate::peripherals::FLEXCOMM14 {
             Clock::FcnFrgFfro => w.sel().fcn_frg_clk(),
             Clock::None => w.sel().none(), // no clock? throw an error?
         });
+
         clkctl1.frg14clksel().write(|w| match clk {
             Clock::FcnFrgMain => w.sel().main_clk(),
             Clock::FcnFrgPll => w.sel().frg_pll_clk(),
@@ -145,6 +148,7 @@ impl FlexcommLowLevel for crate::peripherals::FLEXCOMM14 {
             Clock::FcnFrgFfro => w.sel().ffro_clk(),
             _ => w.sel().none(), // not using frg ...
         });
+
         // todo: add support for frg div/mult
         clkctl1.frg14ctl().write(|w|
                 // SAFETY: unsafe only used for .bits() call
