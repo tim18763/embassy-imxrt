@@ -13,7 +13,7 @@ use sealed::Sealed;
 use crate::clocks::enable_and_reset;
 use crate::iopctl::IopctlPin;
 pub use crate::iopctl::{AnyPin, DriveMode, DriveStrength, Function, Inverter, Pull, SlewRate};
-use crate::{interrupt, into_ref, peripherals, Peripheral, PeripheralRef};
+use crate::{interrupt, peripherals, Peri, PeripheralType};
 
 // This should be unique per IMXRT package
 const PORT_COUNT: usize = 8;
@@ -160,7 +160,7 @@ impl Sense for SenseDisabled {}
 /// remain set while not in output mode, so the pin's level will be 'remembered' when it is not in
 /// output mode.
 pub struct Flex<'d, S: Sense> {
-    pin: PeripheralRef<'d, AnyPin>,
+    pin: Peri<'d, AnyPin>,
     _sense_mode: PhantomData<S>,
 }
 
@@ -240,15 +240,13 @@ impl<S: Sense> Drop for Flex<'_, S> {
 
 impl<'d> Flex<'d, SenseEnabled> {
     /// New flex pin.
-    pub fn new(pin: impl Peripheral<P = impl GpioPin> + 'd) -> Self {
-        into_ref!(pin);
-
+    pub fn new(pin: Peri<'d, impl GpioPin>) -> Self {
         pin.set_function(Function::F0)
             .disable_analog_multiplex()
             .enable_input_buffer();
 
         Self {
-            pin: pin.map_into(),
+            pin: pin.into(),
             _sense_mode: PhantomData::<SenseEnabled>,
         }
     }
@@ -338,15 +336,13 @@ impl<'d> Flex<'d, SenseEnabled> {
 
 impl<'d> Flex<'d, SenseDisabled> {
     /// New flex pin.
-    pub fn new(pin: impl Peripheral<P = impl GpioPin> + 'd) -> Self {
-        into_ref!(pin);
-
+    pub fn new(pin: Peri<'d, impl GpioPin>) -> Self {
         pin.set_function(Function::F0)
             .disable_analog_multiplex()
             .disable_input_buffer();
 
         Self {
-            pin: pin.map_into(),
+            pin: pin.into(),
             _sense_mode: PhantomData::<SenseDisabled>,
         }
     }
@@ -368,7 +364,7 @@ pub struct Input<'d> {
 
 impl<'d> Input<'d> {
     /// New input pin
-    pub fn new(pin: impl Peripheral<P = impl GpioPin> + 'd, pull: Pull, inverter: Inverter) -> Self {
+    pub fn new(pin: Peri<'d, impl GpioPin>, pull: Pull, inverter: Inverter) -> Self {
         let mut pin = Flex::<SenseEnabled>::new(pin);
         pin.set_as_input(pull, inverter);
         Self { pin }
@@ -425,13 +421,11 @@ impl<'d> Input<'d> {
 
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 struct InputFuture<'d> {
-    pin: PeripheralRef<'d, AnyPin>,
+    pin: Peri<'d, AnyPin>,
 }
 
 impl<'d> InputFuture<'d> {
-    fn new(pin: impl Peripheral<P = impl GpioPin> + 'd, int_type: InterruptType, level: Level) -> Self {
-        into_ref!(pin);
-
+    fn new(pin: Peri<'d, impl GpioPin>, int_type: InterruptType, level: Level) -> Self {
         // Clear any existing pending interrupt on this pin
         pin.block()
             .intstata(pin.port())
@@ -453,7 +447,7 @@ impl<'d> InputFuture<'d> {
             .intena(pin.port())
             .modify(|r, w| unsafe { w.int_en().bits(r.int_en().bits() | (1 << pin.pin())) });
 
-        Self { pin: pin.map_into() }
+        Self { pin: pin.into() }
     }
 }
 
@@ -501,7 +495,7 @@ pub struct Output<'d> {
 impl<'d> Output<'d> {
     /// New output pin
     pub fn new(
-        pin: impl Peripheral<P = impl GpioPin> + 'd,
+        pin: Peri<'d, impl GpioPin>,
         initial_output: Level,
         mode: DriveMode,
         strength: DriveStrength,
@@ -568,7 +562,7 @@ trait SealedPin: IopctlPin {
 
 /// GPIO pin trait.
 #[allow(private_bounds)]
-pub trait GpioPin: SealedPin + Sized + Into<AnyPin> + 'static {
+pub trait GpioPin: SealedPin + Sized + PeripheralType + Into<AnyPin> + 'static {
     /// Type-erase the pin.
     fn degrade(self) -> AnyPin {
         // SAFETY: This is only called within the GpioPin trait, which is only

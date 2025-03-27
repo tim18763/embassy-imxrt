@@ -7,7 +7,7 @@ use core::marker::PhantomData;
 use core::task::Poll;
 
 use embassy_hal_internal::interrupt::InterruptExt;
-use embassy_hal_internal::{impl_peripheral, into_ref, Peripheral, PeripheralRef};
+use embassy_hal_internal::{impl_peripheral, Peri, PeripheralType};
 use embassy_sync::waitqueue::AtomicWaker;
 
 use crate::clocks::enable_and_reset;
@@ -45,40 +45,31 @@ impl Default for Config {
 /// ADC channel config
 pub struct ChannelConfig<'d> {
     /// Positive channel to sample
-    p_channel: PeripheralRef<'d, AnyInput>,
+    p_channel: Peri<'d, AnyInput>,
     /// An optional negative channel to sample
-    n_channel: Option<PeripheralRef<'d, AnyInput>>,
+    n_channel: Option<Peri<'d, AnyInput>>,
 }
 
 impl<'d> ChannelConfig<'d> {
     /// Default configuration for single ended channel sampling.
-    pub fn single_ended(input: impl Peripheral<P = impl Input> + 'd) -> Self {
-        into_ref!(input);
+    pub fn single_ended(input: Peri<'d, impl Input>) -> Self {
         Self {
-            p_channel: input.map_into(),
+            p_channel: input.into(),
             n_channel: None,
         }
     }
     /// Default configuration for differential channel sampling.
-    pub fn differential(
-        p_input: impl Peripheral<P = impl Input> + 'd,
-        n_input: impl Peripheral<P = impl Input> + 'd,
-    ) -> Result<Self, Error> {
-        into_ref!(p_input, n_input);
-
-        let p: PeripheralRef<'_, AnyInput> = p_input.map_into();
-        let n: PeripheralRef<'_, AnyInput> = n_input.map_into();
-
+    pub fn differential(p_input: Peri<'d, impl Input>, n_input: Peri<'d, impl Input>) -> Result<Self, Error> {
         // Check matching positive and negative pin are passed in
         // Do not need to check for side as there are only 1 channel for each
         //   polarity
-        if p.channel().ch != n.channel().ch {
+        if p_input.channel().ch != n_input.channel().ch {
             return Err(Error::InvalidConfig);
         }
 
         Ok(Self {
-            p_channel: p,
-            n_channel: Some(n),
+            p_channel: p_input.into(),
+            n_channel: Some(n_input.into()),
         })
     }
 }
@@ -235,13 +226,11 @@ impl<const N: usize> Adc<'_, N> {
 impl<'p, const N: usize> Adc<'p, N> {
     /// Create ADC driver.
     pub fn new<T: Instance>(
-        _adc: impl Peripheral<P = T> + 'p,
+        _adc: Peri<'p, T>,
         _irq: impl Binding<T::Interrupt, InterruptHandler<T>> + 'p,
         config: Config,
         channel_config: [ChannelConfig; N],
     ) -> Self {
-        into_ref!(_adc);
-
         let mut inst = Self {
             info: T::info(),
             _lifetime: PhantomData,
@@ -307,7 +296,7 @@ trait SealedInstance {
 
 /// ADC instance trait.
 #[allow(private_bounds)]
-pub trait Instance: SealedInstance + Peripheral<P = Self> + 'static + Send {
+pub trait Instance: SealedInstance + PeripheralType + 'static + Send {
     /// Interrupt for this ADC instance.
     type Interrupt: interrupt::typelevel::Interrupt;
 }
@@ -378,7 +367,7 @@ pub(crate) trait SealedInput {
 
 /// A dual purpose (digital/analog) input that can be used as analog input to ADC peripheral.
 #[allow(private_bounds)]
-pub trait Input: SealedInput + Into<AnyInput> + Peripheral<P = Self> + Sized + 'static {
+pub trait Input: SealedInput + Into<AnyInput> + PeripheralType + Sized + 'static {
     /// Convert this ADC input pin to a type-erased `AnyInput`.
     ///
     /// This allows using several inputs in situations that might require

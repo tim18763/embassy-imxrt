@@ -1,13 +1,12 @@
 //! implements flexcomm interface wrapper for easier usage across modules
 
-use embassy_hal_internal::Peripheral;
 use paste::paste;
 
 use crate::clocks::{enable_and_reset, SysconPeripheral};
-use crate::pac;
 use crate::peripherals::{
     FLEXCOMM0, FLEXCOMM1, FLEXCOMM14, FLEXCOMM15, FLEXCOMM2, FLEXCOMM3, FLEXCOMM4, FLEXCOMM5, FLEXCOMM6, FLEXCOMM7,
 };
+use crate::{pac, PeripheralType};
 
 /// clock selection option
 #[derive(Copy, Clone, Debug)]
@@ -47,9 +46,7 @@ mod sealed {
 }
 
 /// primary low-level flexcomm interface
-pub(crate) trait FlexcommLowLevel:
-    sealed::Sealed + Peripheral<P = Self> + SysconPeripheral + 'static + Send
-{
+pub(crate) trait FlexcommLowLevel: sealed::Sealed + PeripheralType + SysconPeripheral + 'static + Send {
     // fetch the flexcomm register block for direct manipulation
     fn reg() -> &'static pac::flexcomm0::RegisterBlock;
 

@@ -2,13 +2,12 @@
 
 use core::marker::PhantomData;
 
-use embassy_hal_internal::Peripheral;
 use embassy_sync::waitqueue::AtomicWaker;
 use paste::paste;
 use sealed::Sealed;
 
 use crate::iopctl::IopctlPin as Pin;
-use crate::{dma, interrupt};
+use crate::{dma, interrupt, PeripheralType};
 
 /// I2C Master Driver
 pub mod master;
@@ -90,7 +89,7 @@ trait SealedInstance {
 
 /// shared functions between master and slave operation
 #[allow(private_bounds)]
-pub trait Instance: crate::flexcomm::IntoI2c + SealedInstance + Peripheral<P = Self> + 'static + Send {
+pub trait Instance: crate::flexcomm::IntoI2c + SealedInstance + PeripheralType + 'static + Send {
     /// Interrupt for this I2C instance.
     type Interrupt: interrupt::typelevel::Interrupt;
 }
@@ -174,13 +173,13 @@ impl<T: Instance> interrupt::typelevel::Handler<T::Interrupt> for InterruptHandl
 }
 
 /// io configuration trait for easier configuration
-pub trait SclPin<Instance>: Pin + sealed::Sealed + Peripheral {
+pub trait SclPin<Instance>: Pin + sealed::Sealed + PeripheralType {
     /// convert the pin to appropriate function for SCL usage
     fn as_scl(&self);
 }
 
 /// io configuration trait for easier configuration
-pub trait SdaPin<Instance>: Pin + sealed::Sealed + Peripheral {
+pub trait SdaPin<Instance>: Pin + sealed::Sealed + PeripheralType {
     /// convert the pin to appropriate function for SDA usage
     fn as_sda(&self);
 }

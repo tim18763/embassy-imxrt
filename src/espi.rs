@@ -4,7 +4,6 @@ use core::future::poll_fn;
 use core::marker::PhantomData;
 use core::task::Poll;
 
-use embassy_hal_internal::into_ref;
 use embassy_sync::waitqueue::AtomicWaker;
 use paste::paste;
 
@@ -16,7 +15,7 @@ pub use crate::pac::espi::port::cfg::Direction;
 use crate::pac::espi::port::cfg::Type;
 pub use crate::pac::espi::port::ramuse::Len;
 pub use crate::pac::espi::stataddr::Base;
-use crate::{interrupt, peripherals, Peripheral};
+use crate::{interrupt, peripherals, Peri, PeripheralType};
 
 // This controller has 5 different eSPI ports
 const ESPI_PORTS: usize = 5;
@@ -427,28 +426,18 @@ pub struct Espi<'d> {
 impl<'d> Espi<'d> {
     /// Instantiates new eSPI peripheral and initializes to default values.
     pub fn new<T: Instance>(
-        _peripheral: impl Peripheral<P = T> + 'd,
-        _clk: impl Peripheral<P = impl ClkPin<T>> + 'd,
-        _cs: impl Peripheral<P = impl CsPin<T>> + 'd,
-        _io0: impl Peripheral<P = impl Io0Pin<T>> + 'd,
-        _io1: impl Peripheral<P = impl Io1Pin<T>> + 'd,
-        _io2: impl Peripheral<P = impl Io2Pin<T>> + 'd,
-        _io3: impl Peripheral<P = impl Io3Pin<T>> + 'd,
-        _rst: impl Peripheral<P = impl RstPin<T>> + 'd,
-        _alert: impl Peripheral<P = impl AlertPin<T>> + 'd,
+        _peripheral: Peri<'d, T>,
+        _clk: Peri<'d, impl ClkPin<T>>,
+        _cs: Peri<'d, impl CsPin<T>>,
+        _io0: Peri<'d, impl Io0Pin<T>>,
+        _io1: Peri<'d, impl Io1Pin<T>>,
+        _io2: Peri<'d, impl Io2Pin<T>>,
+        _io3: Peri<'d, impl Io3Pin<T>>,
+        _rst: Peri<'d, impl RstPin<T>>,
+        _alert: Peri<'d, impl AlertPin<T>>,
         _irq: impl interrupt::typelevel::Binding<T::Interrupt, InterruptHandler<T>> + 'd,
         config: Config,
     ) -> Espi<'d> {
-        into_ref!(_peripheral);
-        into_ref!(_clk);
-        into_ref!(_cs);
-        into_ref!(_io0);
-        into_ref!(_io1);
-        into_ref!(_io2);
-        into_ref!(_io3);
-        into_ref!(_rst);
-        into_ref!(_alert);
-
         _alert.as_alert();
         _rst.as_rst();
         _cs.as_cs();
@@ -1066,7 +1055,7 @@ trait SealedInstance {
 
 /// eSPI instance trait.
 #[allow(private_bounds)]
-pub trait Instance: SealedInstance + Peripheral<P = Self> + SysconPeripheral + 'static + Send {
+pub trait Instance: SealedInstance + PeripheralType + SysconPeripheral + 'static + Send {
     /// Interrupt for this eSPI instance.
     type Interrupt: interrupt::typelevel::Interrupt;
 }
@@ -1102,7 +1091,7 @@ macro_rules! pin_traits {
         paste! {
             /// Select pin mode of operation
             #[allow(private_bounds)]
-            pub trait [<$mode:camel Pin>]<T: Instance>: SealedPin + crate::Peripheral {
+            pub trait [<$mode:camel Pin>]<T: Instance>: SealedPin + PeripheralType {
                 /// Set pin mode of operation
                 fn [<as_ $mode>](&self);
             }
