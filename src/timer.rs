@@ -12,7 +12,7 @@ use crate::iopctl::{DriveMode, DriveStrength, Inverter, IopctlPin as Pin, Pull, 
 use crate::pac::clkctl1::ct32bitfclksel::Sel;
 use crate::pac::Clkctl1;
 use crate::pwm::{CentiPercent, Hertz, MicroSeconds};
-use crate::{interrupt, peripherals, Peripheral};
+use crate::{interrupt, peripherals, Peri, PeripheralType};
 
 const COUNT_CHANNEL: usize = 20;
 const CAPTURE_CHANNEL: usize = 20;
@@ -172,7 +172,7 @@ trait InterruptHandler {
 }
 /// shared functions between Controller and Target operation
 #[allow(private_bounds)]
-pub trait Instance: SealedInstance + Peripheral<P = Self> + 'static + Send + InterruptHandler {
+pub trait Instance: SealedInstance + PeripheralType + 'static + Send + InterruptHandler {
     /// Interrupt for this SPI instance.
     type Interrupt: interrupt::typelevel::Interrupt;
 }
@@ -1021,7 +1021,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 impl<'p> CTimerPwm<'p> {
     /// Take the `CTimer` instance supplied and use it as a simple PWM driver. Function returns constructed Pwm instance.
     pub fn new<T: Instance>(
-        _match_channel: impl Peripheral<P = T> + 'p,
+        _match_channel: Peri<'p, T>,
         period_channel: &'p CTimerPwmPeriodChannel,
         matchoutput_pin: impl CTimerMatchOutput,
     ) -> Result<Self> {
@@ -1047,7 +1047,7 @@ impl<'p> CTimerPwm<'p> {
 
 impl<'p> CTimerPwmPeriodChannel<'p> {
     /// Take the `CTimer` instance supplied and use it as a simple PWM driver. Function returns constructed Pwm instance.
-    pub fn new<T: Instance>(_length_channel: impl Peripheral<P = T> + 'p, period: MicroSeconds) -> Result<Self> {
+    pub fn new<T: Instance>(_length_channel: Peri<'p, T>, period: MicroSeconds) -> Result<Self> {
         let channel_info = T::info();
 
         let clock_rate = Hertz(channel_info.pwm_get_clock_freq());
@@ -1172,7 +1172,7 @@ impl<T: Instance> interrupt::typelevel::Handler<T::Interrupt> for CtimerInterrup
 }
 
 /// A trait for pins that can be used as capture event inputs.
-pub trait CaptureEvent: Pin + crate::Peripheral {
+pub trait CaptureEvent: Pin + crate::PeripheralType {
     /// Configures the pin as a capture event input.
     fn configure_for_event_capture(&self);
     /// Get trigger input of event pin
@@ -1224,7 +1224,7 @@ impl_pin!(PIO3_12, F4, Enabled, TrigIn0);
 impl_pin!(PIO3_13, F4, Enabled, TrigIn1);
 
 /// A trait for pins that can be used as CTimer match outputs
-pub trait CTimerMatchOutput: Pin + crate::Peripheral {
+pub trait CTimerMatchOutput: Pin + crate::PeripheralType {
     /// Configures the pin as CTimer match output.
     fn configure_for_ctimer_match_output(&self);
 }

@@ -57,7 +57,7 @@ pub use chip::pac;
 #[cfg(not(feature = "unstable-pac"))]
 pub(crate) use chip::pac;
 pub use chip::{peripherals, Peripherals};
-pub use embassy_hal_internal::{into_ref, Peripheral, PeripheralRef};
+pub use embassy_hal_internal::{Peri, PeripheralType};
 
 #[cfg(feature = "rt")]
 pub use crate::pac::NVIC_PRIO_BITS;

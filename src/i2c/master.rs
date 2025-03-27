@@ -5,14 +5,13 @@ use core::task::Poll;
 
 use embassy_futures::select::{select, Either};
 use embassy_hal_internal::drop::OnDrop;
-use embassy_hal_internal::into_ref;
 
 use super::{
     Async, Blocking, Error, Info, Instance, InterruptHandler, MasterDma, Mode, Result, SclPin, SdaPin, TransferError,
     I2C_WAKERS, TEN_BIT_PREFIX,
 };
 use crate::interrupt::typelevel::Interrupt;
-use crate::{dma, interrupt, Peripheral};
+use crate::{dma, interrupt, Peri};
 
 /// Bus speed (nominal SCL, no clock stretching)
 pub enum Speed {
@@ -38,17 +37,13 @@ pub struct I2cMaster<'a, M: Mode> {
 
 impl<'a, M: Mode> I2cMaster<'a, M> {
     fn new_inner<T: Instance>(
-        _bus: impl Peripheral<P = T> + 'a,
-        scl: impl Peripheral<P = impl SclPin<T>> + 'a,
-        sda: impl Peripheral<P = impl SdaPin<T>> + 'a,
+        _bus: Peri<'a, T>,
+        scl: Peri<'a, impl SclPin<T>>,
+        sda: Peri<'a, impl SdaPin<T>>,
         // TODO - integrate clock APIs to allow dynamic freq selection | clock: crate::flexcomm::Clock,
         speed: Speed,
         dma_ch: Option<dma::channel::Channel<'a>>,
     ) -> Result<Self> {
-        into_ref!(_bus);
-        into_ref!(scl);
-        into_ref!(sda);
-
         sda.as_sda();
         scl.as_scl();
 
@@ -117,9 +112,9 @@ impl<'a, M: Mode> I2cMaster<'a, M> {
 impl<'a> I2cMaster<'a, Blocking> {
     /// use flexcomm fc with Pins scl, sda as an I2C Master bus, configuring to speed and pull
     pub fn new_blocking<T: Instance>(
-        fc: impl Peripheral<P = T> + 'a,
-        scl: impl Peripheral<P = impl SclPin<T>> + 'a,
-        sda: impl Peripheral<P = impl SdaPin<T>> + 'a,
+        fc: Peri<'a, T>,
+        scl: Peri<'a, impl SclPin<T>>,
+        sda: Peri<'a, impl SdaPin<T>>,
         // TODO - integrate clock APIs to allow dynamic freq selection | clock: crate::flexcomm::Clock,
         speed: Speed,
     ) -> Result<Self> {
@@ -317,13 +312,13 @@ impl<'a> I2cMaster<'a, Blocking> {
 impl<'a> I2cMaster<'a, Async> {
     /// use flexcomm fc with Pins scl, sda as an I2C Master bus, configuring to speed and pull
     pub fn new_async<T: Instance>(
-        fc: impl Peripheral<P = T> + 'a,
-        scl: impl Peripheral<P = impl SclPin<T>> + 'a,
-        sda: impl Peripheral<P = impl SdaPin<T>> + 'a,
+        fc: Peri<'a, T>,
+        scl: Peri<'a, impl SclPin<T>>,
+        sda: Peri<'a, impl SdaPin<T>>,
         _irq: impl interrupt::typelevel::Binding<T::Interrupt, InterruptHandler<T>> + 'a,
         // TODO - integrate clock APIs to allow dynamic freq selection | clock: crate::flexcomm::Clock,
         speed: Speed,
-        dma_ch: impl Peripheral<P = impl MasterDma<T>> + 'a,
+        dma_ch: Peri<'a, impl MasterDma<T>>,
     ) -> Result<Self> {
         // TODO - clock integration
         let clock = crate::flexcomm::Clock::Sfro;

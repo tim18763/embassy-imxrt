@@ -8,7 +8,7 @@ use embassy_time_driver::Driver;
 use embassy_time_queue_utils::Queue;
 
 use crate::interrupt::InterruptExt;
-use crate::{interrupt, into_ref, pac, peripherals, Peripheral, PeripheralRef};
+use crate::{interrupt, pac, peripherals, Peri};
 
 fn rtc() -> &'static pac::rtc::RegisterBlock {
     unsafe { &*pac::Rtc::ptr() }
@@ -273,7 +273,7 @@ impl Default for Datetime {
 }
 /// Represents a real-time clock datetime.
 pub struct RtcDatetime<'r> {
-    _p: PeripheralRef<'r, peripherals::RTC>,
+    _p: Peri<'r, peripherals::RTC>,
 }
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[derive(PartialEq)]
@@ -298,8 +298,7 @@ pub enum Error {
 /// Implementation for `RtcDatetime`.
 impl<'r> RtcDatetime<'r> {
     /// Create a new `RtcDatetime` instance.
-    pub fn new(rtc: impl Peripheral<P = peripherals::RTC> + 'r) -> Self {
-        into_ref!(rtc);
+    pub fn new(rtc: Peri<'r, peripherals::RTC>) -> Self {
         Self { _p: rtc }
     }
     /// check valid datetime.

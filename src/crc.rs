@@ -2,11 +2,9 @@
 
 use core::marker::PhantomData;
 
-use embassy_hal_internal::into_ref;
-
 use crate::clocks::{enable_and_reset, SysconPeripheral};
 pub use crate::pac::crc_engine::mode::CrcPolynomial as Polynomial;
-use crate::{peripherals, Peripheral};
+use crate::{peripherals, Peri, PeripheralType};
 
 /// CRC driver.
 pub struct Crc<'d> {
@@ -73,11 +71,9 @@ impl Default for Config {
 
 impl<'d> Crc<'d> {
     /// Instantiates new CRC peripheral and initializes to default values.
-    pub fn new<T: Instance>(_peripheral: impl Peripheral<P = T> + 'd, config: Config) -> Self {
+    pub fn new<T: Instance>(_peripheral: Peri<'d, T>, config: Config) -> Self {
         // enable CRC clock
         enable_and_reset::<T>();
-
-        into_ref!(_peripheral);
 
         let mut instance = Self {
             info: T::info(),
@@ -180,7 +176,7 @@ trait SealedInstance {
 
 /// CRC instance trait.
 #[allow(private_bounds)]
-pub trait Instance: SealedInstance + Peripheral<P = Self> + SysconPeripheral + 'static + Send {}
+pub trait Instance: SealedInstance + PeripheralType + SysconPeripheral + 'static + Send {}
 
 impl Instance for peripherals::CRC {}
 

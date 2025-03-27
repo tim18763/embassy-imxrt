@@ -5,13 +5,12 @@ use core::marker::PhantomData;
 use core::task::Poll;
 
 use embassy_futures::block_on;
-use embassy_hal_internal::into_ref;
 use embassy_sync::waitqueue::AtomicWaker;
 use rand_core::{CryptoRng, RngCore};
 
 use crate::clocks::{enable_and_reset, SysconPeripheral};
 use crate::interrupt::typelevel::Interrupt;
-use crate::{interrupt, peripherals, Peripheral};
+use crate::{interrupt, peripherals, Peri, PeripheralType};
 
 static RNG_WAKER: AtomicWaker = AtomicWaker::new();
 
@@ -65,12 +64,10 @@ pub struct Rng<'d> {
 impl<'d> Rng<'d> {
     /// Create a new RNG driver.
     pub fn new<T: Instance>(
-        _inner: impl Peripheral<P = T> + 'd,
+        _inner: Peri<'d, T>,
         _irq: impl interrupt::typelevel::Binding<T::Interrupt, InterruptHandler<T>> + 'd,
     ) -> Self {
         enable_and_reset::<T>();
-
-        into_ref!(_inner);
 
         let mut random = Self {
             info: T::info(),
@@ -239,7 +236,7 @@ trait SealedInstance {
 
 /// RNG instance trait.
 #[allow(private_bounds)]
-pub trait Instance: SealedInstance + Peripheral<P = Self> + SysconPeripheral + 'static + Send {
+pub trait Instance: SealedInstance + PeripheralType + SysconPeripheral + 'static + Send {
     /// Interrupt for this RNG instance.
     type Interrupt: interrupt::typelevel::Interrupt;
 }

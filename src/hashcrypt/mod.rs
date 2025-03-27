@@ -1,12 +1,11 @@
 //! Hashcrypt
 use core::marker::PhantomData;
 
-use embassy_hal_internal::{into_ref, Peripheral, PeripheralRef};
 use hasher::Hasher;
 
 use crate::clocks::enable_and_reset;
 use crate::peripherals::{DMA0_CH30, HASHCRYPT};
-use crate::{dma, pac};
+use crate::{dma, pac, Peri};
 
 /// Hasher module
 pub mod hasher;
@@ -37,7 +36,7 @@ impl HashcryptDma for DMA0_CH30 {}
 pub struct Hashcrypt<'d, M: Mode> {
     hashcrypt: pac::Hashcrypt,
     dma_ch: Option<dma::channel::Channel<'d>>,
-    _peripheral: PeripheralRef<'d, HASHCRYPT>,
+    _peripheral: Peri<'d, HASHCRYPT>,
     _mode: PhantomData<M>,
 }
 
@@ -59,10 +58,8 @@ impl From<Algorithm> for u8 {
 
 impl<'d, M: Mode> Hashcrypt<'d, M> {
     /// Instantiate new Hashcrypt peripheral
-    fn new_inner(peripheral: impl Peripheral<P = HASHCRYPT> + 'd, dma_ch: Option<dma::channel::Channel<'d>>) -> Self {
+    fn new_inner(peripheral: Peri<'d, HASHCRYPT>, dma_ch: Option<dma::channel::Channel<'d>>) -> Self {
         enable_and_reset::<HASHCRYPT>();
-
-        into_ref!(peripheral);
 
         Self {
             _peripheral: peripheral,
@@ -87,7 +84,7 @@ impl<'d, M: Mode> Hashcrypt<'d, M> {
 
 impl<'d> Hashcrypt<'d, Blocking> {
     /// Create a new instance
-    pub fn new_blocking(peripheral: impl Peripheral<P = HASHCRYPT> + 'd) -> Self {
+    pub fn new_blocking(peripheral: Peri<'d, HASHCRYPT>) -> Self {
         Self::new_inner(peripheral, None)
     }
 
@@ -100,10 +97,7 @@ impl<'d> Hashcrypt<'d, Blocking> {
 
 impl<'d> Hashcrypt<'d, Async> {
     /// Create a new instance
-    pub fn new_async(
-        peripheral: impl Peripheral<P = HASHCRYPT> + 'd,
-        dma_ch: impl Peripheral<P = impl HashcryptDma> + 'd,
-    ) -> Self {
+    pub fn new_async(peripheral: Peri<'d, HASHCRYPT>, dma_ch: Peri<'d, impl HashcryptDma>) -> Self {
         Self::new_inner(peripheral, dma::Dma::reserve_channel(dma_ch))
     }
 

@@ -29,11 +29,10 @@
 // The timer is reset by the match register that is configured to set the PWM cycle length.
 // When the timer is reset to zero, all currently HIGH match outputs configured as PWM outputs are cleared
 
-/// include the traits that are implemented + exposed via this implementation
-use embassy_hal_internal::{Peripheral, PeripheralRef};
-
 /// include pac definitions for instancing
 use crate::pac;
+/// include the traits that are implemented + exposed via this implementation
+use crate::Peri;
 
 /// clock source indicator for selecting while powering on the `SCTimer`
 #[derive(Copy, Clone, Debug)]
@@ -135,11 +134,10 @@ impl Channel {
 
 // non-reexported (sealed) traits
 mod sealed {
-    use embassy_hal_internal::Peripheral;
-
     use crate::clocks::SysconPeripheral;
+    use crate::PeripheralType;
 
-    pub trait SCTimer: Peripheral<P = Self> + SysconPeripheral + 'static + Send {
+    pub trait SCTimer: PeripheralType + SysconPeripheral + 'static + Send {
         fn set_clock_source(clock: super::SCTClockSource);
         fn get_clock_rate(clock: super::SCTClockSource) -> super::Hertz;
         fn set_divisor(divisor: u8);
@@ -306,7 +304,7 @@ impl sealed::SCTimer for crate::peripherals::SCT0 {
 
 /// Basic PWM Object, Consumes a `SCTimer` peripheral hardware instance on construction
 pub struct SCTPwm<'d, T: sealed::SCTimer> {
-    _p: PeripheralRef<'d, T>,
+    _p: Peri<'d, T>,
     period: MicroSeconds,
     clock: SCTClockSource,
     count_max: u32,
@@ -314,7 +312,7 @@ pub struct SCTPwm<'d, T: sealed::SCTimer> {
 
 impl<'d, T: sealed::SCTimer> SCTPwm<'d, T> {
     /// Take the `SCTimer` instance supplied and use it as a simple PWM driver. Function returns constructed Pwm instance.
-    pub fn new(sct: impl Peripheral<P = T> + 'd, period: MicroSeconds, clock: SCTClockSource) -> Self {
+    pub fn new(sct: Peri<'d, T>, period: MicroSeconds, clock: SCTClockSource) -> Self {
         // requested period must be possible with configured clock selection (within bounds of u8 divisor)!
 
         let clock_rate = T::get_clock_rate(clock);
@@ -348,7 +346,7 @@ impl<'d, T: sealed::SCTimer> SCTPwm<'d, T> {
         T::configure(factor);
 
         Self {
-            _p: sct.into_ref(),
+            _p: sct,
             period,
             clock,
             count_max: factor,

@@ -2,7 +2,7 @@
 
 use core::marker::PhantomData;
 
-use embassy_hal_internal::{into_ref, Peripheral};
+use embassy_hal_internal::{Peri, PeripheralType};
 
 use crate::clocks::{enable_and_reset, SysconPeripheral};
 use crate::peripherals::{WDT0, WDT1};
@@ -27,7 +27,7 @@ trait SealedInstance {
 
 /// WWDT instance trait
 #[allow(private_bounds)]
-pub trait Instance: SealedInstance + Peripheral<P = Self> + SysconPeripheral + 'static + Send {}
+pub trait Instance: SealedInstance + PeripheralType + SysconPeripheral + 'static + Send {}
 
 // Cortex-M33 watchdog
 impl SealedInstance for crate::peripherals::WDT0 {
@@ -126,9 +126,7 @@ impl<'d> WindowedWatchdog<'d> {
     ///
     /// This is not automatically cleared here because application code may wish to check
     /// if it is set via a call to [`Self::timed_out`] to determine if a watchdog reset occurred previously.
-    pub fn new<T: Instance>(_instance: impl Peripheral<P = T> + 'd, timeout_us: u32) -> Self {
-        into_ref!(_instance);
-
+    pub fn new<T: Instance>(_instance: Peri<'d, T>, timeout_us: u32) -> Self {
         let mut wwdt = Self {
             info: T::info(),
             _phantom: PhantomData,

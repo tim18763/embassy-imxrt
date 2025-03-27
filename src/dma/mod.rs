@@ -13,7 +13,7 @@ use embassy_sync::waitqueue::AtomicWaker;
 use crate::clocks::enable_and_reset;
 use crate::dma::channel::Channel;
 use crate::peripherals::{self, DMA0};
-use crate::{interrupt, Peripheral};
+use crate::{interrupt, Peri, PeripheralType};
 
 // TODO:
 //
@@ -146,7 +146,7 @@ struct DmaInfo {
 
 impl<'d> Dma<'d> {
     /// Reserves a DMA channel for exclusive use
-    pub fn reserve_channel<T: Instance>(_inner: impl Peripheral<P = T> + 'd) -> Option<Channel<'d>> {
+    pub fn reserve_channel<T: Instance>(_inner: Peri<'d, T>) -> Option<Channel<'d>> {
         if T::info().is_some() {
             Some(Channel {
                 info: T::info().unwrap(),
@@ -164,7 +164,7 @@ trait SealedInstance {
 
 /// DMA instance trait
 #[allow(private_bounds)]
-pub trait Instance: SealedInstance + Peripheral<P = Self> + 'static + Send {
+pub trait Instance: SealedInstance + PeripheralType + 'static + Send {
     /// Interrupt for this DMA instance
     type Interrupt: interrupt::typelevel::Interrupt;
 }
