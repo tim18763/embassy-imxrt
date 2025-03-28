@@ -16,13 +16,13 @@ async fn main(_spawner: Spawner) {
     info!("Initializing CRC");
 
     // CRC-CCITT
-    let mut crc = Crc::new(&mut p.CRC, Default::default());
+    let mut crc = Crc::new(p.CRC.reborrow(), Default::default());
     let output = crc.feed_bytes(data);
     defmt::assert_eq!(output, 0x29b1);
 
     // CRC16-ARC
     let mut crc = Crc::new(
-        &mut p.CRC,
+        p.CRC.reborrow(),
         Config {
             polynomial: Polynomial::Crc16,
             reverse_in: true,
@@ -37,7 +37,7 @@ async fn main(_spawner: Spawner) {
 
     // CRC16-CMS
     let mut crc = Crc::new(
-        &mut p.CRC,
+        p.CRC.reborrow(),
         Config {
             polynomial: Polynomial::Crc16,
             reverse_in: false,
@@ -52,7 +52,7 @@ async fn main(_spawner: Spawner) {
 
     // CRC16-DDS-110
     let mut crc = Crc::new(
-        &mut p.CRC,
+        p.CRC.reborrow(),
         Config {
             polynomial: Polynomial::Crc16,
             reverse_in: false,
@@ -67,7 +67,7 @@ async fn main(_spawner: Spawner) {
 
     // CRC16-MAXIM-DOW
     let mut crc = Crc::new(
-        &mut p.CRC,
+        p.CRC.reborrow(),
         Config {
             polynomial: Polynomial::Crc16,
             reverse_in: true,
@@ -82,7 +82,7 @@ async fn main(_spawner: Spawner) {
 
     // CRC16-MODBUS
     let mut crc = Crc::new(
-        &mut p.CRC,
+        p.CRC.reborrow(),
         Config {
             polynomial: Polynomial::Crc16,
             reverse_in: true,
@@ -97,7 +97,7 @@ async fn main(_spawner: Spawner) {
 
     // CRC32-BZIP2
     let mut crc = Crc::new(
-        &mut p.CRC,
+        p.CRC.reborrow(),
         Config {
             polynomial: Polynomial::Crc32,
             reverse_in: false,
@@ -112,7 +112,7 @@ async fn main(_spawner: Spawner) {
 
     // CRC32-CKSUM
     let mut crc = Crc::new(
-        &mut p.CRC,
+        p.CRC.reborrow(),
         Config {
             polynomial: Polynomial::Crc32,
             reverse_in: false,
@@ -127,7 +127,7 @@ async fn main(_spawner: Spawner) {
 
     // CRC32-ISO-HDLC
     let mut crc = Crc::new(
-        &mut p.CRC,
+        p.CRC.reborrow(),
         Config {
             polynomial: Polynomial::Crc32,
             reverse_in: true,
@@ -142,7 +142,7 @@ async fn main(_spawner: Spawner) {
 
     // CRC32-JAMCRC
     let mut crc = Crc::new(
-        &mut p.CRC,
+        p.CRC.reborrow(),
         Config {
             polynomial: Polynomial::Crc32,
             reverse_in: true,
@@ -157,7 +157,7 @@ async fn main(_spawner: Spawner) {
 
     // CRC32-MPEG-2
     let mut crc = Crc::new(
-        &mut p.CRC,
+        p.CRC.reborrow(),
         Config {
             polynomial: Polynomial::Crc32,
             reverse_in: false,
