@@ -139,13 +139,13 @@ impl sealed::Sealed for Async {}
 impl Mode for Async {}
 
 /// A timer that captures events based on a specified edge and calls a user-defined callback.
-pub struct CaptureTimer<M: Mode, P: CaptureEvent> {
+pub struct CaptureTimer<'p, M: Mode, P: CaptureEvent> {
     id: usize,
     event_clock_counts: u32,
     clk_freq: u32,
     _phantom: core::marker::PhantomData<M>,
     info: Info,
-    event_pin: P,
+    event_pin: Peri<'p, P>,
 }
 
 /// A timer that counts down to zero and calls a user-defined callback.
@@ -511,7 +511,7 @@ impl From<TriggerInput> for crate::pac::inputmux::ct32bit_cap::ct32bit_cap_sel::
     }
 }
 
-impl<M: Mode, P: CaptureEvent> CaptureTimer<M, P> {
+impl<'p, M: Mode, P: CaptureEvent> CaptureTimer<'p, M, P> {
     /// Returns the captured clock count
     /// Captured clock = (Capture value - previous counter value)
     fn get_event_capture_time_us(&self) -> u32 {
@@ -562,9 +562,9 @@ impl<M: Mode, P: CaptureEvent> CaptureTimer<M, P> {
     }
 }
 
-impl<P: CaptureEvent> CaptureTimer<Async, P> {
+impl<'p, P: CaptureEvent> CaptureTimer<'p, Async, P> {
     /// Creates a new `CaptureTimer` in asynchronous mode.
-    pub fn new_async<T: Instance>(_inst: T, pin: P, clk: impl ConfigurableClock) -> Self {
+    pub fn new_async<T: Instance>(_inst: Peri<'p, T>, pin: Peri<'p, P>, clk: impl ConfigurableClock) -> Self {
         let info = T::info();
         let module = info.module;
         T::interrupt_enable();
@@ -645,9 +645,9 @@ impl<P: CaptureEvent> CaptureTimer<Async, P> {
     }
 }
 
-impl<P: CaptureEvent> CaptureTimer<Blocking, P> {
+impl<'p, P: CaptureEvent> CaptureTimer<'p, Blocking, P> {
     /// Creates a new `CaptureTimer` in blocking mode.
-    pub fn new_blocking<T: Instance>(_inst: T, pin: P, clk: impl ConfigurableClock) -> Self {
+    pub fn new_blocking<T: Instance>(_inst: Peri<'p, T>, pin: Peri<'p, P>, clk: impl ConfigurableClock) -> Self {
         let info = T::info();
         let module = info.module;
         T::interrupt_enable();
@@ -755,9 +755,9 @@ impl<M: Mode> CountingTimer<M> {
     }
 }
 
-impl CountingTimer<Async> {
+impl<'p> CountingTimer<Async> {
     /// Creates a new `CountingTimer` in asynchronous mode.
-    pub fn new_async<T: Instance>(_inst: T, clk: impl ConfigurableClock) -> Self {
+    pub fn new_async<T: Instance>(_inst: Peri<'p, T>, clk: impl ConfigurableClock) -> Self {
         let info = T::info();
         T::interrupt_enable();
         Self {
@@ -786,9 +786,9 @@ impl CountingTimer<Async> {
     }
 }
 
-impl CountingTimer<Blocking> {
+impl<'p> CountingTimer<Blocking> {
     /// Creates a new `CountingTimer` in blocking mode.
-    pub fn new_blocking<T: Instance>(_inst: T, clk: impl ConfigurableClock) -> Self {
+    pub fn new_blocking<T: Instance>(_inst: Peri<'p, T>, clk: impl ConfigurableClock) -> Self {
         let info = T::info();
         T::interrupt_enable();
         Self {
@@ -822,7 +822,7 @@ impl<M: Mode> Drop for CountingTimer<M> {
     }
 }
 
-impl<M: Mode, P: CaptureEvent> Drop for CaptureTimer<M, P> {
+impl<'p, M: Mode, P: CaptureEvent> Drop for CaptureTimer<'p, M, P> {
     fn drop(&mut self) {
         self.info.cap_timer_interrupt_disable();
         self.info.cap_timer_disable_falling_edge_event();
@@ -1023,7 +1023,7 @@ impl<'p> CTimerPwm<'p> {
     pub fn new<T: Instance>(
         _match_channel: Peri<'p, T>,
         period_channel: &'p CTimerPwmPeriodChannel,
-        matchoutput_pin: impl CTimerMatchOutput,
+        matchoutput_pin: Peri<'p, impl CTimerMatchOutput>,
     ) -> Result<Self> {
         let channel_info = T::info();
 
