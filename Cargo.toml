@@ -71,7 +71,7 @@ embassy-hal-internal = { git = "https://github.com/embassy-rs/embassy", features
     "cortex-m",
     "prio-bits-3",
 ] }
-defmt = { version = "0.3", optional = true }
+defmt = { version = "1.0", optional = true }
 log = { version = "0.4.14", optional = true }
 nb = "1.0.0"
 cfg-if = "1.0.0"
