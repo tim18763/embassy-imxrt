@@ -5,6 +5,7 @@ use core::marker::PhantomData;
 use core::task::Poll;
 
 use embassy_futures::select::{select, Either};
+use embassy_hal_internal::drop::OnDrop;
 use embassy_hal_internal::{Peri, PeripheralType};
 use embassy_sync::waitqueue::AtomicWaker;
 use paste::paste;
@@ -556,6 +557,11 @@ impl<'a> UartTx<'a, Async> {
     pub async fn write(&mut self, buf: &[u8]) -> Result<()> {
         let regs = self.info.regs;
 
+        // Disable DMA on completion/cancellation
+        let _dma_guard = OnDrop::new(|| {
+            regs.fifocfg().modify(|_, w| w.dmatx().disabled());
+        });
+
         for chunk in buf.chunks(1024) {
             regs.fifocfg().modify(|_, w| w.dmatx().enabled());
 
@@ -609,8 +615,6 @@ impl<'a> UartTx<'a, Async> {
                 }),
             )
             .await;
-
-            regs.fifocfg().modify(|_, w| w.dmatx().disabled());
 
             match res {
                 Either::First(()) | Either::Second(Ok(())) => (),
@@ -697,6 +701,11 @@ impl<'a> UartRx<'a, Async> {
                 Default::default(),
             );
 
+            // Disable DMA on completion/cancellation
+            let _dma_guard = OnDrop::new(|| {
+                regs.fifocfg().modify(|_, w| w.dmarx().disabled());
+            });
+
             let res = select(
                 transfer,
                 poll_fn(|cx| {
@@ -741,8 +750,6 @@ impl<'a> UartRx<'a, Async> {
             )
             .await;
 
-            regs.fifocfg().modify(|_, w| w.dmarx().disabled());
-
             match res {
                 Either::First(()) | Either::Second(Ok(())) => (),
                 Either::Second(e) => return e,
@@ -769,6 +776,9 @@ impl<'a> Uart<'a, Async> {
 
         let tx = tx.into();
         let rx = rx.into();
+
+        T::Interrupt::unpend();
+        unsafe { T::Interrupt::enable() };
 
         let tx_dma = dma::Dma::reserve_channel(tx_dma);
         let rx_dma = dma::Dma::reserve_channel(rx_dma);
@@ -1131,27 +1141,27 @@ pub trait Instance: crate::flexcomm::IntoUsart + SealedInstance + PeripheralType
 
 macro_rules! impl_instance {
     ($($n:expr),*) => {
-	$(
-	    paste!{
-		impl SealedInstance for crate::peripherals::[<FLEXCOMM $n>] {
-		    fn info() -> Info {
-			Info {
-			    regs: unsafe { &*crate::pac::[<Usart $n>]::ptr() },
-			    index: $n,
-			}
-		    }
+        $(
+            paste!{
+                impl SealedInstance for crate::peripherals::[<FLEXCOMM $n>] {
+                    fn info() -> Info {
+                        Info {
+                            regs: unsafe { &*crate::pac::[<Usart $n>]::ptr() },
+                            index: $n,
+                        }
+                    }
 
-		    #[inline]
-		    fn index() -> usize {
-			$n
-		    }
-		}
+                    #[inline]
+                    fn index() -> usize {
+                        $n
+                    }
+                }
 
-		impl Instance for crate::peripherals::[<FLEXCOMM $n>] {
-		    type Interrupt = crate::interrupt::typelevel::[<FLEXCOMM $n>];
-		}
-	    }
-	)*
+                impl Instance for crate::peripherals::[<FLEXCOMM $n>] {
+                    type Interrupt = crate::interrupt::typelevel::[<FLEXCOMM $n>];
+                }
+            }
+        )*
     };
 }
 
@@ -1191,7 +1201,7 @@ pub trait RtsPin<T: Instance>: Pin + sealed::Sealed + PeripheralType {
 macro_rules! impl_pin_trait {
     ($fcn:ident, $mode:ident, $($pin:ident, $fn:ident),*) => {
         paste! {
-	    $(
+            $(
                 impl [<$mode:camel Pin>]<crate::peripherals::$fcn> for crate::peripherals::$pin {
                     fn [<as_ $mode>](&self) {
                         // UM11147 table 507 pg 495
@@ -1205,7 +1215,7 @@ macro_rules! impl_pin_trait {
                             .set_input_inverter(Inverter::Disabled);
                     }
                 }
-	    )*
+            )*
         }
     };
 }
