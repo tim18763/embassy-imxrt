@@ -508,7 +508,7 @@ impl<'a> I2cMaster<'a, Async> {
                 // Use drop guard to ensure that DMA is disabled when we exit
                 // scope, successful or not.
                 let _dma_guard = OnDrop::new(|| {
-                    i2cregs.mstctl().write(|w| w.mstdma().disabled());
+                    i2cregs.mstctl().modify(|_r, w| w.mstdma().disabled());
                 });
 
                 let res = select(
@@ -651,7 +651,7 @@ impl<'a> I2cMaster<'a, Async> {
             // Use drop guard to ensure that DMA is disabled when we exit
             // scope, successful or not.
             let dma_guard = OnDrop::new(|| {
-                i2cregs.mstctl().write(|w| w.mstdma().disabled());
+                i2cregs.mstctl().modify(|_r, w| w.mstdma().disabled());
             });
 
             let res = select(
