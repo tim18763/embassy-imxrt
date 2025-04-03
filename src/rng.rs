@@ -102,6 +102,8 @@ impl<'d> Rng<'d> {
         // wait for interrupt
         let res = poll_fn(|cx| {
             // Check if already ready.
+            // TODO: Is this necessary? Could we just check once after
+            // the waker has been registered?
             if self.info.regs.int_status().read().ent_val().bit_is_set() {
                 return Poll::Ready(Ok(()));
             }

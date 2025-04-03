@@ -646,10 +646,12 @@ impl<'a> UartTx<'a, Async> {
         G: FnMut(&mut Self),
     {
         poll_fn(|cx| {
+            // Register waker before checking condition, to ensure that wakes/interrupts
+            // aren't lost between f() and g()
+            UART_WAKERS[self.info.index].register(cx.waker());
             let r = f(self);
 
             if r.is_pending() {
-                UART_WAKERS[self.info.index].register(cx.waker());
                 g(self);
             }
 
