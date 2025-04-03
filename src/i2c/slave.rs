@@ -442,8 +442,9 @@ impl I2cSlave<'_, Async> {
         if i2c.stat().read().slvstate().is_slave_address() {
             i2c.slvctl().write(|w| w.slvcontinue().continue_());
         } else {
-            // If we are not addressed here, then we have issues.
-            return Err(TransferError::OtherBusError.into());
+            // If we are already past the addressed phase and in transmit or receive, that means we are already in the
+            // next state, most likely due to calling listen() before the previous transaction is completed and leading
+            // to state transition out of order. We can tolerate that, so we just move onto the next state.
         }
 
         // Poll for HW to transitioning from addressed to receive/transmit
