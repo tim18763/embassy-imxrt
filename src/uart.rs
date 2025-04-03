@@ -770,6 +770,9 @@ impl<'a> Uart<'a, Async> {
         let tx = tx.into();
         let rx = rx.into();
 
+        T::Interrupt::unpend();
+        unsafe { T::Interrupt::enable() };
+
         let tx_dma = dma::Dma::reserve_channel(tx_dma);
         let rx_dma = dma::Dma::reserve_channel(rx_dma);
 
