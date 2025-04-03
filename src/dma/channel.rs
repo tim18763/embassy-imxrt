@@ -87,6 +87,7 @@ impl<'d> Channel<'d> {
             let channel = self.info.ch_num;
 
             // Has the transfer already completed?
+            // TODO: Is this necessary? We could check once after registration
             if self.info.regs.active0().read().act().bits() & (1 << channel) == 0 {
                 return Poll::Ready(());
             }
