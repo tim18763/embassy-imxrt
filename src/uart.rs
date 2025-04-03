@@ -411,7 +411,7 @@ impl<'a, M: Mode> Uart<'a, M> {
     fn set_uart_config<T: Instance>(config: Config) {
         let regs = T::info().regs;
 
-        regs.cfg().write(|w| w.enable().disabled());
+        regs.cfg().modify(|_, w| w.enable().disabled());
 
         regs.cfg().modify(|_, w| {
             w.datalen()
