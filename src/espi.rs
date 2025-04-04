@@ -161,7 +161,16 @@ pub enum PortConfig {
     PutPcMem32,
 
     /// Mailbox Split OOB
-    MailboxSplitOOB,
+    MailboxSplitOOB {
+        /// Port address to the host
+        addr: u16,
+
+        /// Offset into RAM space
+        offset: u16,
+
+        /// Length of the mailbox or mastering area per direction.
+        length: Len,
+    },
 
     /// Slave Flash
     SlaveFlash,
@@ -183,7 +192,7 @@ impl Into<Type> for PortConfig {
             PortConfig::MailboxSingle { .. } => Type::MailboxSingle,
             PortConfig::MailboxSplit { .. } => Type::MailboxSplit,
             PortConfig::PutPcMem32 => Type::MailboxShared,
-            PortConfig::MailboxSplitOOB => Type::MailboxOobSplit,
+            PortConfig::MailboxSplitOOB { .. } => Type::MailboxOobSplit,
             PortConfig::SlaveFlash => Type::BusMFlashS,
             PortConfig::MemSingle => Type::BusMMemS,
             PortConfig::MasterFlash => Type::BusMFlashS,
@@ -577,6 +586,17 @@ impl<'d> Espi<'d> {
                 self.mailbox(port, config.into(), direction, addr, offset, length);
             }
 
+            PortConfig::MailboxSplitOOB { addr, offset, length } => {
+                self.mailbox(
+                    port,
+                    config.into(),
+                    Direction::BidirectionalUnenforced,
+                    addr,
+                    offset,
+                    length,
+                );
+            }
+
             _ => {
                 self.info.regs.mctrl().modify(|_, w| w.pena(port as u8).disabled());
             }
@@ -601,10 +621,6 @@ impl<'d> Espi<'d> {
                 .intspc3()
                 .clear_bit_by_one()
         });
-
-        // REVISIT: it's unclear if this is really needed, but it sure
-        // helps getting things working.
-        self.info.regs.port(port).irulestat().write(|w| w.srst().set_bit());
     }
 
     /// Wait for controller event
@@ -722,6 +738,29 @@ impl<'d> Espi<'d> {
                         .crcerr()
                         .set_bit()
                 });
+            },
+        )
+        .await
+    }
+
+    /// Wait for platform reset
+    pub async fn wait_for_plat_reset(&mut self) {
+        self.wait_for(
+            |me| {
+                if me.info.regs.mstat().read().wire_chg().bit_is_set() {
+                    me.info.regs.mstat().write(|w| w.wire_chg().clear_bit_by_one());
+                    let wirero = me.info.regs.wirero().read();
+                    if wirero.pltrstn().bit_is_set() {
+                        Poll::Ready(())
+                    } else {
+                        Poll::Pending
+                    }
+                } else {
+                    Poll::Pending
+                }
+            },
+            |me| {
+                me.info.regs.intenset().write(|w| w.wire_chg().set_bit());
             },
         )
         .await
