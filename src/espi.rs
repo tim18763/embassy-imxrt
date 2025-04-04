@@ -161,7 +161,16 @@ pub enum PortConfig {
     PutPcMem32,
 
     /// Mailbox Split OOB
-    MailboxSplitOOB,
+    MailboxSplitOOB {
+        /// Port address to the host
+        addr: u16,
+
+        /// Offset into RAM space
+        offset: u16,
+
+        /// Length of the mailbox or mastering area per direction.
+        length: Len,
+    },
 
     /// Slave Flash
     SlaveFlash,
@@ -183,7 +192,7 @@ impl Into<Type> for PortConfig {
             PortConfig::MailboxSingle { .. } => Type::MailboxSingle,
             PortConfig::MailboxSplit { .. } => Type::MailboxSplit,
             PortConfig::PutPcMem32 => Type::MailboxShared,
-            PortConfig::MailboxSplitOOB => Type::MailboxOobSplit,
+            PortConfig::MailboxSplitOOB { .. } => Type::MailboxOobSplit,
             PortConfig::SlaveFlash => Type::BusMFlashS,
             PortConfig::MemSingle => Type::BusMMemS,
             PortConfig::MasterFlash => Type::BusMFlashS,
@@ -576,6 +585,9 @@ impl<'d> Espi<'d> {
             } => {
                 self.mailbox(port, config.into(), direction, addr, offset, length);
             }
+            PortConfig::MailboxSplitOOB { addr, offset, length } => {
+                self.mailbox_oob(port, addr, offset, length);
+            }
 
             _ => {
                 self.info.regs.mctrl().modify(|_, w| w.pena(port as u8).disabled());
@@ -601,10 +613,6 @@ impl<'d> Espi<'d> {
                 .intspc3()
                 .clear_bit_by_one()
         });
-
-        // REVISIT: it's unclear if this is really needed, but it sure
-        // helps getting things working.
-        self.info.regs.port(port).irulestat().write(|w| w.srst().set_bit());
     }
 
     /// Wait for controller event
@@ -722,6 +730,29 @@ impl<'d> Espi<'d> {
                         .crcerr()
                         .set_bit()
                 });
+            },
+        )
+        .await
+    }
+
+    /// Wait for platform reset
+    pub async fn wait_for_plat_reset(&mut self) {
+        self.wait_for(
+            |me| {
+                if me.info.regs.mstat().read().wire_chg().bit_is_set() {
+                    me.info.regs.mstat().write(|w| w.wire_chg().clear_bit_by_one());
+                    let wirero = me.info.regs.wirero().read();
+                    if wirero.pltrstn().bit_is_set() {
+                        Poll::Ready(())
+                    } else {
+                        Poll::Pending
+                    }
+                } else {
+                    Poll::Pending
+                }
+            },
+            |me| {
+                me.info.regs.intenset().write(|w| w.wire_chg().set_bit());
             },
         )
         .await
@@ -962,6 +993,58 @@ impl Espi<'_> {
             .port(port)
             .dataout()
             .write(|w| unsafe { w.data().bits(0x44) });
+    }
+
+    fn mailbox_oob(&mut self, port: usize, addr: u16, offset: u16, length: Len) {
+        // Set port type
+        self.info
+            .regs
+            .port(port)
+            .cfg()
+            .modify(|_, w| w.type_().mailbox_oob_split());
+
+        // All OOB endpoints are bidirectional
+        self.info
+            .regs
+            .port(port)
+            .cfg()
+            .modify(|_, w| w.direction().variant(Direction::BidirectionalUnenforced));
+
+        // Set port interrupt rules
+        self.info.regs.port(port).irulestat().write(|w| {
+            unsafe { w.ustat().bits(0) }
+                .interr()
+                .set_bit()
+                .intrd()
+                .set_bit()
+                .intwr()
+                .set_bit()
+                .intspc0()
+                .set_bit()
+                .intspc1()
+                .set_bit()
+                .intspc2()
+                .set_bit()
+                .intspc3()
+                .set_bit()
+        });
+
+        // Set port mapped address
+        self.info
+            .regs
+            .port(port)
+            .addr()
+            .write(|w| unsafe { w.off().bits(addr) }.base_or_asz().offset_from_0());
+
+        // Set port RAM use
+        self.info
+            .regs
+            .port(port)
+            .ramuse()
+            .write(|w| unsafe { w.off().bits(offset) }.len().variant(length));
+
+        // Enable the port
+        self.info.regs.mctrl().modify(|_, w| w.pena(port as u8).enabled());
     }
 
     fn mailbox(&mut self, port: usize, port_type: Type, direction: Direction, addr: u16, offset: u16, length: Len) {
