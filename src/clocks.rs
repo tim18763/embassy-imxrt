@@ -824,13 +824,13 @@ impl ConfigurableClock for MainPllClkConfig {
                     // SAFETY: unsafe needed to write the bits for pfd0
                     clkctl0
                         .syspll0pfd()
-                        .modify(|_, w| unsafe { w.pfd0_clkgate().gated().pfd0().bits(0x0) });
+                        .modify(|_, w| unsafe { w.pfd0().bits(0) }.pfd0_clkgate().gated());
                     // set pfd bits and un-gate the clock output
                     // output is multiplied by syspll * 18/pfd0_bits
                     // SAFETY: unsafe needed to write the bits for pfd0
                     clkctl0
                         .syspll0pfd()
-                        .modify(|_r, w| unsafe { w.pfd0_clkgate().not_gated().pfd0().bits(0x12) });
+                        .modify(|_r, w| unsafe { w.pfd0().bits(0x12) }.pfd0_clkgate().not_gated());
                     // wait for ready bit to be set
                     delay_loop_clocks(50, desired_freq);
                     trace!("waiting for mainpll clock to be ready");
@@ -907,50 +907,46 @@ impl MainPllClkConfig {
     pub(self) fn init_syspll_pfd2(config_bits: u8) {
         // SAFETY: unsafe needed to take pointer to Clkctl0 and write specific bits
         // needed to change the output of pfd0
-        unsafe {
-            let clkctl0 = crate::pac::Clkctl0::steal();
+        let clkctl0 = unsafe { crate::pac::Clkctl0::steal() };
 
-            // Disable the clock output first.
-            // SAFETY: unsafe needed to write the bits for pfd2
-            clkctl0
-                .syspll0pfd()
-                .modify(|_, w| w.pfd2_clkgate().gated().pfd2().bits(0x0));
+        // Disable the clock output first.
+        // SAFETY: unsafe needed to write the bits for pfd2
+        clkctl0
+            .syspll0pfd()
+            .modify(|_, w| unsafe { w.pfd2().bits(0x0) }.pfd2_clkgate().gated());
 
-            // Set the new value and enable output.
-            // SAFETY: unsafe needed to write the bits for pfd2
-            clkctl0
-                .syspll0pfd()
-                .modify(|_, w| w.pfd2_clkgate().not_gated().pfd2().bits(config_bits));
+        // Set the new value and enable output.
+        // SAFETY: unsafe needed to write the bits for pfd2
+        clkctl0
+            .syspll0pfd()
+            .modify(|_, w| unsafe { w.pfd2().bits(config_bits) }.pfd2_clkgate().not_gated());
 
-            // Wait for output becomes stable.
-            while clkctl0.syspll0pfd().read().pfd2_clkrdy().bit_is_clear() {}
+        // Wait for output becomes stable.
+        while clkctl0.syspll0pfd().read().pfd2_clkrdy().bit_is_clear() {}
 
-            // Clear ready status flag.
-            clkctl0.syspll0pfd().modify(|_, w| w.pfd2_clkrdy().clear_bit());
-        }
+        // Clear ready status flag.
+        clkctl0.syspll0pfd().modify(|_, w| w.pfd2_clkrdy().clear_bit());
     }
     /// Enables default settings for pfd0
     pub(self) fn init_syspll_pfd0(config_bits: u8) {
         // SAFETY: unsafe needed to take pointer to Clkctl0 and write specific bits
         // needed to change the output of pfd0
-        unsafe {
-            let clkctl0 = crate::pac::Clkctl0::steal();
-            // Disable the clock output first
-            clkctl0
-                .syspll0pfd()
-                .modify(|_, w| w.pfd0_clkgate().gated().pfd0().bits(0x0));
+        let clkctl0 = unsafe { crate::pac::Clkctl0::steal() };
+        // Disable the clock output first
+        clkctl0
+            .syspll0pfd()
+            .modify(|_, w| unsafe { w.pfd0().bits(0) }.pfd0_clkgate().gated());
 
-            // Set the new value and enable output
-            clkctl0
-                .syspll0pfd()
-                .modify(|_, w| w.pfd0_clkgate().not_gated().pfd0().bits(config_bits));
+        // Set the new value and enable output
+        clkctl0
+            .syspll0pfd()
+            .modify(|_, w| unsafe { w.pfd0().bits(config_bits) }.pfd0_clkgate().not_gated());
 
-            // Wait for output becomes stable
-            while clkctl0.syspll0pfd().read().pfd0_clkrdy().bit_is_clear() {}
+        // Wait for output becomes stable
+        while clkctl0.syspll0pfd().read().pfd0_clkrdy().bit_is_clear() {}
 
-            // Clear ready status flag
-            clkctl0.syspll0pfd().modify(|_, w| w.pfd0_clkrdy().clear_bit());
-        }
+        // Clear ready status flag
+        clkctl0.syspll0pfd().modify(|_, w| w.pfd0_clkrdy().clear_bit());
     }
 }
 
@@ -968,7 +964,7 @@ impl MainClkConfig {
         // SAFETY: unsafe needed to write the bits for pfcdiv
         clkctl0
             .pfcdiv(0)
-            .write(|w| unsafe { w.div().bits(2 - 1).halt().clear_bit() });
+            .write(|w| unsafe { w.div().bits(2 - 1) }.halt().clear_bit());
         while clkctl0.pfcdiv(0).read().reqflag().bit_is_set() {}
 
         // Set FRGPLLCLKDIV divider to value 12, Subtract 1 since 0-> 1, 1-> 2, etc...
@@ -976,7 +972,7 @@ impl MainClkConfig {
         // SAFETY: unsafe needed to write the bits for frgpllclkdiv
         clkctl1
             .frgpllclkdiv()
-            .write(|w| unsafe { w.div().bits(12 - 1).halt().clear_bit() });
+            .write(|w| unsafe { w.div().bits(12 - 1) }.halt().clear_bit());
         while clkctl1.frgpllclkdiv().read().reqflag().bit_is_set() {}
     }
 }
@@ -1319,20 +1315,19 @@ pub fn delay_loop_clocks(usec: u64, freq_mhz: u64) {
 
 /// Configure the pad voltage pmc registers for all 3 vddio ranges
 fn set_pad_voltage_range() {
-    // SAFETY: unsafe needed to take pointer to PNC as well as to write specific bits
-    unsafe {
-        let pmc = crate::pac::Pmc::steal();
-        // Set up IO voltages
-        // all 3 ranges need to be 1.71-1.98V which is 01
-        pmc.padvrange().write(|w| {
-            w.vddio_0range()
-                .bits(0b01)
-                .vddio_1range()
-                .bits(0b01)
-                .vddio_2range()
-                .bits(0b01)
-        });
-    }
+    // SAFETY: unsafe needed to take pointer to PMC
+    let pmc = unsafe { crate::pac::Pmc::steal() };
+
+    // Set up IO voltages
+    // all 3 ranges need to be 1.71-1.98V which is 01
+    pmc.padvrange().write(|w| {
+        w.vddio_0range()
+            .vddio_0range_1()
+            .vddio_1range()
+            .vddio_1range_1()
+            .vddio_2range()
+            .vddio_2range_1()
+    });
 }
 
 /// Initialize AHB clock
@@ -1480,7 +1475,7 @@ impl ClockOutConfig {
             let cc1 = unsafe { pac::Clkctl1::steal() };
 
             cc1.clkoutdiv()
-                .modify(|_, w| unsafe { w.div().bits(div).halt().clear_bit() });
+                .modify(|_, w| unsafe { w.div().bits(div) }.halt().clear_bit());
             while cc1.clkoutdiv().read().reqflag().bit_is_set() {}
         }
         Ok(())
