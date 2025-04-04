@@ -585,8 +585,16 @@ impl<'d> Espi<'d> {
             } => {
                 self.mailbox(port, config.into(), direction, addr, offset, length);
             }
+
             PortConfig::MailboxSplitOOB { addr, offset, length } => {
-                self.mailbox_oob(port, addr, offset, length);
+                self.mailbox(
+                    port,
+                    config.into(),
+                    Direction::BidirectionalUnenforced,
+                    addr,
+                    offset,
+                    length,
+                );
             }
 
             _ => {
@@ -993,58 +1001,6 @@ impl Espi<'_> {
             .port(port)
             .dataout()
             .write(|w| unsafe { w.data().bits(0x44) });
-    }
-
-    fn mailbox_oob(&mut self, port: usize, addr: u16, offset: u16, length: Len) {
-        // Set port type
-        self.info
-            .regs
-            .port(port)
-            .cfg()
-            .modify(|_, w| w.type_().mailbox_oob_split());
-
-        // All OOB endpoints are bidirectional
-        self.info
-            .regs
-            .port(port)
-            .cfg()
-            .modify(|_, w| w.direction().variant(Direction::BidirectionalUnenforced));
-
-        // Set port interrupt rules
-        self.info.regs.port(port).irulestat().write(|w| {
-            unsafe { w.ustat().bits(0) }
-                .interr()
-                .set_bit()
-                .intrd()
-                .set_bit()
-                .intwr()
-                .set_bit()
-                .intspc0()
-                .set_bit()
-                .intspc1()
-                .set_bit()
-                .intspc2()
-                .set_bit()
-                .intspc3()
-                .set_bit()
-        });
-
-        // Set port mapped address
-        self.info
-            .regs
-            .port(port)
-            .addr()
-            .write(|w| unsafe { w.off().bits(addr) }.base_or_asz().offset_from_0());
-
-        // Set port RAM use
-        self.info
-            .regs
-            .port(port)
-            .ramuse()
-            .write(|w| unsafe { w.off().bits(offset) }.len().variant(length));
-
-        // Enable the port
-        self.info.regs.mctrl().modify(|_, w| w.pena(port as u8).enabled());
     }
 
     fn mailbox(&mut self, port: usize, port_type: Type, direction: Direction, addr: u16, offset: u16, length: Len) {
