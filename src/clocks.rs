@@ -856,9 +856,12 @@ impl MainPllClkConfig {
     pub(self) fn calc_mult(rate: u32, base_freq: u32) -> Result<u8, ClockError> {
         trace!("calculating mult for {:#} / {:#}", rate, base_freq);
         const VALIDMULTS: [u8; 6] = [16, 17, 20, 22, 27, 33];
+
         if rate > base_freq && rate % base_freq == 0 {
             let mult = (rate / base_freq) as u8;
+
             trace!("verifying that calculated mult {:#} is valid", mult);
+
             if VALIDMULTS.contains(&mult) {
                 Ok(mult)
             } else {
@@ -868,6 +871,7 @@ impl MainPllClkConfig {
             Err(ClockError::InvalidFrequency)
         }
     }
+
     pub(self) fn init_syspll() {
         // SAFETY: unsafe needed to take pointers to Sysctl0 and Clkctl0
         let clkctl0 = unsafe { crate::pac::Clkctl0::steal() };
@@ -903,6 +907,7 @@ impl MainPllClkConfig {
         clkctl0.syspll0ctl0().modify(|_, w| w.holdringoff_ena().dsiable());
         delay_loop_clocks((15 & 0xFFFF) / 2, 12_000_000);
     }
+
     /// enables default settings for pfd2 bits
     pub(self) fn init_syspll_pfd2(config_bits: u8) {
         // SAFETY: unsafe needed to take pointer to Clkctl0 and write specific bits
@@ -927,6 +932,7 @@ impl MainPllClkConfig {
         // Clear ready status flag.
         clkctl0.syspll0pfd().modify(|_, w| w.pfd2_clkrdy().clear_bit());
     }
+
     /// Enables default settings for pfd0
     pub(self) fn init_syspll_pfd0(config_bits: u8) {
         // SAFETY: unsafe needed to take pointer to Clkctl0 and write specific bits
@@ -1012,92 +1018,89 @@ impl MultiSourceClock for MainClkConfig {
         if !clock_src_config.is_enabled() {
             return Err(ClockError::ClockNotEnabled);
         }
-        if let Ok(c) = <Clocks as TryInto<MainClkSrc>>::try_into(*clock_src) {
-            // SAFETY: unsafe needed to take pointer to Clkctl0
-            // needed to change the clock source
-            let clkctl0 = unsafe { crate::pac::Clkctl0::steal() };
-            match c {
-                MainClkSrc::ClkIn => {
-                    self.src = MainClkSrc::ClkIn;
 
-                    clkctl0.mainclksela().write(|w| w.sel().sysxtal_clk());
+        let c = <Clocks as TryInto<MainClkSrc>>::try_into(*clock_src).map_err(|_| ClockError::ClockNotSupported)?;
+
+        // SAFETY: unsafe needed to take pointer to Clkctl0
+        // needed to change the clock source
+        let clkctl0 = unsafe { crate::pac::Clkctl0::steal() };
+        match c {
+            MainClkSrc::ClkIn => {
+                self.src = MainClkSrc::ClkIn;
+
+                clkctl0.mainclksela().write(|w| w.sel().sysxtal_clk());
+                clkctl0.mainclkselb().write(|w| w.sel().main_1st_clk());
+                Ok(())
+            }
+            // the following will yield the same result as if compared to FFROdiv4
+            MainClkSrc::FFRO | MainClkSrc::FFROdiv4 => match rate {
+                div4 if div4 == (FfroFreq::Ffro60m as u32) / 4 || div4 == (FfroFreq::Ffro48m as u32) / 4 => {
+                    self.src = MainClkSrc::FFROdiv4;
+                    self.freq.store(div4, Ordering::Relaxed);
+
+                    clkctl0.mainclksela().write(|w| w.sel().ffro_div_4());
                     clkctl0.mainclkselb().write(|w| w.sel().main_1st_clk());
                     Ok(())
                 }
-                // the following will yield the same result as if compared to FFROdiv4
-                MainClkSrc::FFRO | MainClkSrc::FFROdiv4 => match rate {
-                    div4 if div4 == (FfroFreq::Ffro60m as u32) / 4 || div4 == (FfroFreq::Ffro48m as u32) / 4 => {
-                        self.src = MainClkSrc::FFROdiv4;
-                        self.freq.store(div4, Ordering::Relaxed);
+                div1 if div1 == FfroFreq::Ffro60m as u32 || div1 == FfroFreq::Ffro48m as u32 => {
+                    self.src = MainClkSrc::FFRO;
+                    self.freq.store(div1, Ordering::Relaxed);
 
-                        clkctl0.mainclksela().write(|w| w.sel().ffro_div_4());
+                    clkctl0.mainclksela().write(|w| w.sel().ffro_clk());
+                    clkctl0.mainclkselb().write(|w| w.sel().main_1st_clk());
+                    Ok(())
+                }
+                _ => Err(ClockError::InvalidFrequency),
+            },
+            MainClkSrc::Lposc => {
+                let r = <u32 as TryInto<LposcFreq>>::try_into(rate).map_err(|_| ClockError::InvalidFrequency)?;
+
+                match r {
+                    LposcFreq::Lp1m => {
+                        self.src = MainClkSrc::Lposc;
+                        self.freq.store(rate, Ordering::Relaxed);
+
+                        clkctl0.mainclksela().write(|w| w.sel().lposc());
                         clkctl0.mainclkselb().write(|w| w.sel().main_1st_clk());
                         Ok(())
                     }
-                    div1 if div1 == FfroFreq::Ffro60m as u32 || div1 == FfroFreq::Ffro48m as u32 => {
-                        self.src = MainClkSrc::FFRO;
-                        self.freq.store(div1, Ordering::Relaxed);
-
-                        clkctl0.mainclksela().write(|w| w.sel().ffro_clk());
-                        clkctl0.mainclkselb().write(|w| w.sel().main_1st_clk());
-                        Ok(())
-                    }
-                    _ => Err(ClockError::InvalidFrequency),
-                },
-                MainClkSrc::Lposc => {
-                    if let Ok(r) = <u32 as TryInto<LposcFreq>>::try_into(rate) {
-                        match r {
-                            LposcFreq::Lp1m => {
-                                self.src = MainClkSrc::Lposc;
-                                self.freq.store(rate, Ordering::Relaxed);
-
-                                clkctl0.mainclksela().write(|w| w.sel().lposc());
-                                clkctl0.mainclkselb().write(|w| w.sel().main_1st_clk());
-                                Ok(())
-                            }
-                            LposcFreq::Lp32k => Err(ClockError::InvalidFrequency),
-                        }
-                    } else {
-                        Err(ClockError::InvalidFrequency)
-                    }
-                }
-                MainClkSrc::SFRO => {
-                    if rate == SFRO_FREQ {
-                        self.src = MainClkSrc::SFRO;
-                        self.freq.store(rate, Ordering::Relaxed);
-                        clkctl0.mainclkselb().write(|w| w.sel().sfro_clk());
-                        Ok(())
-                    } else {
-                        Err(ClockError::InvalidFrequency)
-                    }
-                }
-                MainClkSrc::PllMain => {
-                    let r = rate;
-                    // From Section 4.6.1.1 Pll Limitations of the RT6xx User manual
-                    let pll_max = 572_000_000;
-                    let pll_min = 80_000_000;
-                    if pll_min <= r && r <= pll_max {
-                        clkctl0.mainclkselb().write(|w| w.sel().main_pll_clk());
-                        self.src = MainClkSrc::PllMain;
-                        self.freq.store(r, Ordering::Relaxed);
-                        Ok(())
-                    } else {
-                        Err(ClockError::InvalidFrequency)
-                    }
-                }
-                MainClkSrc::RTC32k => {
-                    if rate == RtcFreq::SubSecond32kHz as u32 {
-                        self.src = MainClkSrc::RTC32k;
-                        self.freq.store(rate, Ordering::Relaxed);
-                        clkctl0.mainclkselb().write(|w| w.sel().rtc_32k_clk());
-                        Ok(())
-                    } else {
-                        Err(ClockError::InvalidFrequency)
-                    }
+                    LposcFreq::Lp32k => Err(ClockError::InvalidFrequency),
                 }
             }
-        } else {
-            Err(ClockError::ClockNotSupported)
+            MainClkSrc::SFRO => {
+                if rate == SFRO_FREQ {
+                    self.src = MainClkSrc::SFRO;
+                    self.freq.store(rate, Ordering::Relaxed);
+                    clkctl0.mainclkselb().write(|w| w.sel().sfro_clk());
+                    Ok(())
+                } else {
+                    Err(ClockError::InvalidFrequency)
+                }
+            }
+            MainClkSrc::PllMain => {
+                let r = rate;
+                // From Section 4.6.1.1 Pll Limitations of the RT6xx User manual
+                let pll_max = 572_000_000;
+                let pll_min = 80_000_000;
+                if pll_min <= r && r <= pll_max {
+                    clkctl0.mainclkselb().write(|w| w.sel().main_pll_clk());
+                    self.src = MainClkSrc::PllMain;
+                    self.freq.store(r, Ordering::Relaxed);
+                    Ok(())
+                } else {
+                    Err(ClockError::InvalidFrequency)
+                }
+            }
+            MainClkSrc::RTC32k => {
+                if rate == RtcFreq::SubSecond32kHz as u32 {
+                    self.src = MainClkSrc::RTC32k;
+                    self.freq.store(rate, Ordering::Relaxed);
+                    clkctl0.mainclkselb().write(|w| w.sel().rtc_32k_clk());
+                    Ok(())
+                } else {
+                    Err(ClockError::InvalidFrequency)
+                }
+            }
         }
     }
 }
