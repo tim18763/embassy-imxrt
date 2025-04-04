@@ -858,8 +858,8 @@ impl MainPllClkConfig {
         const VALIDMULTS: [u8; 6] = [16, 17, 20, 22, 27, 33];
         if rate > base_freq && rate % base_freq == 0 {
             let mult = (rate / base_freq) as u8;
-            trace!("verifying that calculated mult {:#} is a valid one", mult);
-            if VALIDMULTS.into_iter().any(|i| i == mult) {
+            trace!("verifying that calculated mult {:#} is valid", mult);
+            if VALIDMULTS.contains(&mult) {
                 Ok(mult)
             } else {
                 Err(ClockError::InvalidFrequency)
