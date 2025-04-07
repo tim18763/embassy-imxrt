@@ -2,6 +2,7 @@
 
 use core::future::poll_fn;
 use core::marker::PhantomData;
+use core::sync::atomic::Ordering;
 use core::task::Poll;
 
 use embassy_hal_internal::drop::OnDrop;
@@ -9,7 +10,7 @@ use embassy_hal_internal::Peri;
 
 use super::{
     Async, Blocking, Info, Instance, InterruptHandler, Mode, Result, SclPin, SdaPin, SlaveDma, TransferError,
-    I2C_WAKERS, TEN_BIT_PREFIX,
+    I2C_REMEDIATION, I2C_WAKERS, REMEDIATON_SLAVE_NAK, TEN_BIT_PREFIX,
 };
 use crate::interrupt::typelevel::Interrupt;
 use crate::pac::i2c0::stat::Slvstate;
@@ -276,7 +277,7 @@ impl I2cSlave<'_, Blocking> {
 
         self.block_until_addressed()?;
 
-        //Block until we know it is read or write
+        // Block until we know it is read or write
         self.poll()?;
 
         if let Some(ten_bit_address) = self.ten_bit_info {
@@ -532,6 +533,10 @@ impl I2cSlave<'_, Async> {
                 .unwrap()
                 .read_from_peripheral(i2c.slvdat().as_ptr() as *mut u8, buf, options);
 
+        // Hold guard to make sure that we send a NAK on cancellation
+        // Since drop order is reverse, this comes BEFORE the dma guard,
+        // so the DMA guard will be dropped FIRST, then the NAK guard.
+        let nak_guard = NakGuard { info: self.info };
         // Hold guard to disable on cancellation or completion
         let _dma_guard = OnDrop::new(|| {
             i2c.slvctl().modify(|_r, w| w.slvdma().disabled());
@@ -563,6 +568,7 @@ impl I2cSlave<'_, Async> {
         .await;
 
         // Complete DMA transaction and get transfer count
+        nak_guard.defuse();
         let xfer_count = self.abort_dma(buf_len);
         let stat = i2c.stat().read();
         // We got a stop from master, either way this transaction is
@@ -576,7 +582,7 @@ impl I2cSlave<'_, Async> {
             // We are addressed again, so this must be a restart
             return Ok(Response::Complete(xfer_count));
         } else if stat.slvstate().is_slave_receive() {
-            // That was a partial transaction, the master want to send more
+            // That was a partial transaction, the master wants to send more
             // data
             return Ok(Response::Pending(xfer_count));
         }
@@ -692,5 +698,50 @@ impl I2cSlave<'_, Async> {
         }
 
         xfer_count
+    }
+}
+
+/// This guard represents that we have started being written to, but without completing
+/// the write. If this guard is dropped without calling [`NakGuard::defuse()`],
+/// then we will signal the interrupt handler to send a NAK the next time that the
+/// I2C peripheral engine is in the PENDING state.
+///
+/// According to 24.6.11 Table 577 of the reference manual, if the I2C peripheral is
+/// NOT in the PENDING state, then it will not accept commands, including the NAK
+/// command. Rather than busy-spin in the drop function for this state to be reached,
+/// or leaving the bus in the un-stopped state, we ask the interrupt handler to do
+/// it for us.
+#[must_use]
+struct NakGuard {
+    info: Info,
+}
+
+impl NakGuard {
+    fn defuse(self) {
+        core::mem::forget(self);
+    }
+}
+
+impl Drop for NakGuard {
+    fn drop(&mut self) {
+        // This is done in a critical section to ensure that we don't race with the
+        // I2C interrupt. This could potentially be done without a critical section,
+        // however the duration is extremely short, and doesn't require a loop to do
+        // so.
+        critical_section::with(|_| {
+            // Ensure the SLV pending enable interrupt is active, in case we need it
+            self.info.regs.intenset().write(|w| w.slvpendingen().set_bit());
+            // Check if the i2c engine is in a pending state, ready to accept commands
+            let is_pending = self.info.regs.stat().read().slvpending().is_pending();
+
+            if is_pending {
+                // We are pending, we can issue the NAK immediately
+                self.info.regs.slvctl().write(|w| w.slvnack().set_bit());
+            } else {
+                // We are NOT pending, we need to ask the interrupt to send a NAK the next
+                // time the engine is pending. We ensured that the interrupt is active above.
+                I2C_REMEDIATION[self.info.index].fetch_or(REMEDIATON_SLAVE_NAK, Ordering::AcqRel);
+            }
+        })
     }
 }

@@ -1,6 +1,9 @@
 //! Implements I2C function support over flexcomm + gpios
 
+use core::future::poll_fn;
 use core::marker::PhantomData;
+use core::sync::atomic::{AtomicU8, Ordering};
+use core::task::Poll;
 
 use embassy_sync::waitqueue::AtomicWaker;
 use paste::paste;
@@ -77,6 +80,7 @@ mod sealed {
 
 impl<T: Pin> sealed::Sealed for T {}
 
+#[derive(Clone, Copy)]
 struct Info {
     regs: &'static crate::pac::i2c0::RegisterBlock,
     index: usize,
@@ -134,6 +138,39 @@ impl_instance!(0, 1, 2, 3, 4, 5, 6, 7, 15);
 const I2C_COUNT: usize = 9;
 static I2C_WAKERS: [AtomicWaker; I2C_COUNT] = [const { AtomicWaker::new() }; I2C_COUNT];
 
+// Used in cases where there was a cancellation that needs to be cleaned up on the next
+// interrupt
+static I2C_REMEDIATION: [AtomicU8; I2C_COUNT] = [const { AtomicU8::new(0) }; I2C_COUNT];
+const REMEDIATON_NONE: u8 = 0b0000_0000;
+const REMEDIATON_MASTER_STOP: u8 = 0b0000_0001;
+const REMEDIATON_SLAVE_NAK: u8 = 0b0000_0010;
+
+/// Force the remediation state to NONE. To be used when first initializing
+/// a peripheral. This is meant to cover the extremely esoteric state where:
+///
+/// 1. We start an async operation that sends a START
+/// 2. We cancel that operation, without sending STOP, so a remediation is requested
+/// 3. BEFORE the remediation completes, we create a blocking peripheral
+fn force_clear_remediation(info: &Info) {
+    I2C_REMEDIATION[info.index].store(REMEDIATON_NONE, Ordering::Release);
+}
+
+/// Await the remediation step being completed by the interrupt, after
+/// a previous cancellation
+async fn wait_remediation_complete(info: &Info) {
+    let index = info.index;
+    poll_fn(|cx| {
+        I2C_WAKERS[index].register(cx.waker());
+        let rem = I2C_REMEDIATION[index].load(Ordering::Acquire);
+        if rem == REMEDIATON_NONE {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    })
+    .await;
+}
+
 /// Ten bit addresses start with first byte 0b11110XXX
 pub const TEN_BIT_PREFIX: u8 = 0b11110 << 3;
 
@@ -149,6 +186,17 @@ impl<T: Instance> interrupt::typelevel::Handler<T::Interrupt> for InterruptHandl
         let i2c = T::info().regs;
 
         if i2c.intstat().read().mstpending().bit_is_set() {
+            // Retrieve and mask off the remediation flags
+            let mask = !(REMEDIATON_MASTER_STOP | REMEDIATON_SLAVE_NAK);
+            let rem = I2C_REMEDIATION[T::index()].fetch_and(mask, Ordering::AcqRel);
+
+            if (rem & REMEDIATON_MASTER_STOP) != 0 {
+                i2c.mstctl().write(|w| w.mststop().set_bit());
+            }
+            if (rem & REMEDIATON_SLAVE_NAK) != 0 {
+                i2c.slvctl().write(|w| w.slvnack().set_bit());
+            }
+
             i2c.intenclr().write(|w| w.mstpendingclr().set_bit());
         }
 

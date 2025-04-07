@@ -1,14 +1,16 @@
 /// I2C Master Driver
 use core::future::poll_fn;
 use core::marker::PhantomData;
+use core::sync::atomic::Ordering;
 use core::task::Poll;
 
 use embassy_futures::select::{select, Either};
 use embassy_hal_internal::drop::OnDrop;
 
 use super::{
-    Async, Blocking, Error, Info, Instance, InterruptHandler, MasterDma, Mode, Result, SclPin, SdaPin, TransferError,
-    I2C_WAKERS, TEN_BIT_PREFIX,
+    force_clear_remediation, wait_remediation_complete, Async, Blocking, Error, Info, Instance, InterruptHandler,
+    MasterDma, Mode, Result, SclPin, SdaPin, TransferError, I2C_REMEDIATION, I2C_WAKERS, REMEDIATON_MASTER_STOP,
+    TEN_BIT_PREFIX,
 };
 use crate::interrupt::typelevel::Interrupt;
 use crate::{dma, interrupt, Peri};
@@ -118,6 +120,7 @@ impl<'a> I2cMaster<'a, Blocking> {
         // TODO - integrate clock APIs to allow dynamic freq selection | clock: crate::flexcomm::Clock,
         speed: Speed,
     ) -> Result<Self> {
+        force_clear_remediation(&T::info());
         // TODO - clock integration
         let clock = crate::flexcomm::Clock::Sfro;
         T::enable(clock);
@@ -321,6 +324,7 @@ impl<'a> I2cMaster<'a, Async> {
         dma_ch: Peri<'a, impl MasterDma<T>>,
     ) -> Result<Self> {
         // TODO - clock integration
+        force_clear_remediation(&T::info());
         let clock = crate::flexcomm::Clock::Sfro;
         T::enable(clock);
         T::into_i2c();
@@ -334,20 +338,29 @@ impl<'a> I2cMaster<'a, Async> {
         Ok(this)
     }
 
-    async fn start(&mut self, address: u16, is_read: bool) -> Result<()> {
+    async fn start(&mut self, address: u16, is_read: bool, guard: Option<StartStopGuard>) -> Result<StartStopGuard> {
         // check if the address is 10-bit
         let is_10bit = address > 0x7F;
 
         // start with the correct address
         if is_10bit {
-            self.start_10bit(address, is_read).await
+            self.start_10bit(address, is_read, guard).await
         } else {
-            self.start_7bit(address as u8, is_read).await
+            self.start_7bit(address as u8, is_read, guard).await
         }
     }
 
-    async fn start_7bit(&mut self, address: u8, is_read: bool) -> Result<()> {
+    async fn start_7bit(
+        &mut self,
+        address: u8,
+        is_read: bool,
+        guard: Option<StartStopGuard>,
+    ) -> Result<StartStopGuard> {
         let i2cregs = self.info.regs;
+
+        // If there was a previous cancellation, wait for the remediation step by the
+        // interrupt to complete.
+        wait_remediation_complete(&self.info).await;
 
         self.wait_on(
             |me| {
@@ -392,20 +405,35 @@ impl<'a> I2cMaster<'a, Async> {
 
         i2cregs.mstctl().write(|w| w.mststart().set_bit());
 
+        // We have now sent a start, create a guard to ensure that a stop is sent
+        let guard = guard.unwrap_or_else(|| StartStopGuard { info: self.info });
+
+        // Did that go well?
         let res = self.poll_for_ready(is_read).await;
 
         // Defuse the sentinel if future is not dropped
         on_drop.defuse();
 
-        res
+        res?;
+
+        Ok(guard)
     }
 
-    async fn start_10bit(&mut self, address: u16, is_read: bool) -> Result<()> {
+    async fn start_10bit(
+        &mut self,
+        address: u16,
+        is_read: bool,
+        guard: Option<StartStopGuard>,
+    ) -> Result<StartStopGuard> {
         // check if the address is 10-bit and within the valid range
         if address > 0x3FF {
             return Err(Error::UnsupportedConfiguration);
         }
         let i2cregs = self.info.regs;
+
+        // If there was a previous cancellation, wait for the remediation step by the
+        // interrupt to complete.
+        wait_remediation_complete(&self.info).await;
 
         self.wait_on(
             |me| {
@@ -450,6 +478,7 @@ impl<'a> I2cMaster<'a, Async> {
         let addr_high = TEN_BIT_PREFIX | (((address >> 8) as u8) << 1);
         i2cregs.mstdat().write(|w| unsafe { w.data().bits(addr_high) });
         i2cregs.mstctl().write(|w| w.mststart().set_bit());
+        let guard = guard.unwrap_or_else(|| StartStopGuard { info: self.info });
 
         // 10-bit address mode requires the two address bytes to be sent as a write operation
         self.poll_for_ready(false).await?;
@@ -472,10 +501,15 @@ impl<'a> I2cMaster<'a, Async> {
         }
         // Defuse the sentinel if future is not dropped
         on_drop.defuse();
-        Ok(())
+        Ok(guard)
     }
 
-    async fn read_no_stop(&mut self, address: u16, read: &mut [u8]) -> Result<()> {
+    async fn read_no_stop(
+        &mut self,
+        address: u16,
+        read: &mut [u8],
+        guard: Option<StartStopGuard>,
+    ) -> Result<StartStopGuard> {
         let i2cregs = self.info.regs;
 
         // read of 0 size is not allowed according to i2c spec
@@ -486,7 +520,7 @@ impl<'a> I2cMaster<'a, Async> {
             return Err(TransferError::OtherBusError.into());
         };
 
-        self.start(address, true).await?;
+        let guard = self.start(address, true, guard).await?;
 
         if self.dma_ch.is_some() {
             if !dma_read.is_empty() {
@@ -619,17 +653,22 @@ impl<'a> I2cMaster<'a, Async> {
                 }
             }
         }
-        Ok(())
+        Ok(guard)
     }
 
-    async fn write_no_stop(&mut self, address: u16, write: &[u8]) -> Result<()> {
+    async fn write_no_stop(
+        &mut self,
+        address: u16,
+        write: &[u8],
+        guard: Option<StartStopGuard>,
+    ) -> Result<StartStopGuard> {
         // Procedure from 24.3.1.1 pg 545
         let i2cregs = self.info.regs;
 
-        self.start(address, false).await?;
+        let guard = self.start(address, false, guard).await?;
 
         if write.is_empty() {
-            return Ok(());
+            return Ok(guard);
         }
 
         if self.dma_ch.is_some() {
@@ -713,7 +752,8 @@ impl<'a> I2cMaster<'a, Async> {
                     });
                 },
             )
-            .await
+            .await?;
+            Ok(guard)
         } else {
             for byte in write.iter() {
                 i2cregs.mstdat().write(|w|
@@ -751,7 +791,7 @@ impl<'a> I2cMaster<'a, Async> {
 
                 self.check_for_bus_errors()?;
             }
-            Ok(())
+            Ok(guard)
         }
     }
 
@@ -926,41 +966,93 @@ impl<A: embedded_hal_1::i2c::AddressMode + Into<u16>> embedded_hal_1::i2c::I2c<A
 
 impl<A: embedded_hal_1::i2c::AddressMode + Into<u16>> embedded_hal_async::i2c::I2c<A> for I2cMaster<'_, Async> {
     async fn read(&mut self, address: A, read: &mut [u8]) -> Result<()> {
-        self.read_no_stop(address.into(), read).await?;
-        self.stop().await
+        let guard = self.read_no_stop(address.into(), read, None).await?;
+        self.stop().await?;
+        guard.defuse();
+        Ok(())
     }
 
     async fn write(&mut self, address: A, write: &[u8]) -> Result<()> {
-        self.write_no_stop(address.into(), write).await?;
-        self.stop().await
+        let guard = self.write_no_stop(address.into(), write, None).await?;
+        self.stop().await?;
+        guard.defuse();
+        Ok(())
     }
 
     async fn write_read(&mut self, address: A, write: &[u8], read: &mut [u8]) -> Result<()> {
         let address = address.into();
-        self.write_no_stop(address, write).await?;
-        self.read_no_stop(address, read).await?;
-        self.stop().await
+        let guard = self.write_no_stop(address, write, None).await?;
+        let guard = self.read_no_stop(address, read, Some(guard)).await?;
+        self.stop().await?;
+        guard.defuse();
+        Ok(())
     }
 
     async fn transaction(&mut self, address: A, operations: &mut [embedded_hal_1::i2c::Operation<'_>]) -> Result<()> {
-        let needs_stop = !operations.is_empty();
         let address = address.into();
+        let mut guard = None;
 
         for op in operations {
             match op {
                 embedded_hal_1::i2c::Operation::Read(read) => {
-                    self.read_no_stop(address, read).await?;
+                    guard = Some(self.read_no_stop(address, read, guard).await?);
                 }
                 embedded_hal_1::i2c::Operation::Write(write) => {
-                    self.write_no_stop(address, write).await?;
+                    guard = Some(self.write_no_stop(address, write, guard).await?);
                 }
             }
         }
 
-        if needs_stop {
+        if let Some(guard) = guard {
             self.stop().await?;
+            guard.defuse();
         }
 
         Ok(())
+    }
+}
+
+/// This guard represents that a START has been sent, but no matching STOP has
+/// been sent. If this guard is dropped without calling [`StartStopGuard::defuse()`],
+/// then we will signal the interrupt handler to send a STOP the next time that the
+/// I2C peripheral engine is in the PENDING state.
+///
+/// According to 24.6.2 Table 566 of the reference manual, if the I2C peripheral is
+/// NOT in the PENDING state, then it will not accept commands, including the STOP
+/// command. Rather than busy-spin in the drop function for this state to be reached,
+/// or leaving the bus in the un-stopped state, we ask the interrupt handler to do
+/// it for us.
+#[must_use]
+struct StartStopGuard {
+    info: Info,
+}
+
+impl StartStopGuard {
+    fn defuse(self) {
+        core::mem::forget(self);
+    }
+}
+
+impl Drop for StartStopGuard {
+    fn drop(&mut self) {
+        // This is done in a critical section to ensure that we don't race with the
+        // I2C interrupt. This could potentially be done without a critical section,
+        // however the duration is extremely short, and doesn't require a loop to do
+        // so.
+        critical_section::with(|_| {
+            // Ensure the MST pending enable interrupt is active, in case we need it
+            self.info.regs.intenset().write(|w| w.mstpendingen().set_bit());
+            // Check if the i2c engine is in a pending state, ready to accept commands
+            let is_pending = self.info.regs.stat().read().mstpending().is_pending();
+
+            if is_pending {
+                // We are pending, we can issue the stop immediately
+                self.info.regs.mstctl().write(|w| w.mststop().set_bit());
+            } else {
+                // We are NOT pending, we need to ask the interrupt to send a stop the next
+                // time the engine is pending. We ensured that the interrupt is active above
+                I2C_REMEDIATION[self.info.index].fetch_or(REMEDIATON_MASTER_STOP, Ordering::AcqRel);
+            }
+        })
     }
 }
