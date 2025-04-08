@@ -814,6 +814,25 @@ impl<'d> Espi<'d> {
         self.block_for_vwire_done();
     }
 
+    /// Trigger OOB read from host
+    /// When this completes it will send a INTWR event on OOB port
+    /// Maximum len is 64
+    pub fn oob_read_start(&mut self, port: usize, length: u8) {
+        // SAFETY: length can be any value in bits 6:0, bit 7 is reserved 0
+        self.info
+            .regs
+            .port(port)
+            .omflen()
+            .write(|w| unsafe { w.len().bits(length) });
+        // SAFETY: 0x2 = Completed by MCU in SSCTL register
+        // PAC definition is being updated to expose enum of valid values
+        self.info
+            .regs
+            .port(port)
+            .irulestat()
+            .modify(|_, w| unsafe { w.sstcl().bits(0x2) });
+    }
+
     /// Generate WAKE# event to wake Host up from Sx on any
     /// event. Also a general purpose event to wake on Lid switch or
     /// AC insertion.
