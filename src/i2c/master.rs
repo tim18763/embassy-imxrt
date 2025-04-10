@@ -623,7 +623,33 @@ impl<'a> I2cMaster<'a, Async> {
         // Procedure from 24.3.1.1 pg 545
         let i2cregs = self.info.regs;
 
-        self.start(address, false).await?;
+        unsafe {
+            let mut cortex = cortex_m::Peripherals::steal();
+            let mut cycles_diff = 0;
+            let mut cycles1 = 0;
+            if cortex_m::peripheral::DWT::has_cycle_counter() {
+                cycles1 = cortex_m::peripheral::DWT::cycle_count();
+            }
+
+            self.start(address, false).await?;
+
+            if cortex_m::peripheral::DWT::has_cycle_counter() {
+                let cycles2 = cortex_m::peripheral::DWT::cycle_count();
+                // Use wrapping subtraction to handle potential wrap-around
+                cycles_diff = cycles2.wrapping_sub(cycles1);
+                //defmt::info!("DWT Cycle Counter: 1st - {} ... 2nd - {}", cycles1, cycles2);
+                //defmt::info!("DWT Cycle Counter: diff = {} cycles!!!", cycles_diff);
+
+                // At 250MHz, 250 cycles equal 1 microsecond.
+                let microseconds = cycles_diff / 250;
+
+                if (microseconds > 1000) {
+                    defmt::error!("Time difference in write_no_stop = {} microseconds", microseconds);
+                    defmt::error!("i2c address is {:02X} ", address);
+                    //defmt::error!("i2c write is is {:02X} ", write);
+                }
+            }
+        }
 
         if write.is_empty() {
             return Ok(());
