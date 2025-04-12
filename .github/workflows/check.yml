@@ -164,8 +164,8 @@ jobs:
 
       - name: cargo doc
         run: |
-          cargo doc --no-deps -F mimxrt685s,rt,defmt,time,time-driver,unstable-pac
-          cargo doc --no-deps -F mimxrt633s,rt,defmt,time,time-driver,unstable-pac
+          cargo doc --no-deps -F mimxrt685s,rt,defmt,time,time-driver,unstable-pac --locked
+          cargo doc --no-deps -F mimxrt633s,rt,defmt,time,time-driver,unstable-pac --locked
         env:
           RUSTDOCFLAGS: --cfg docsrs
 
@@ -242,7 +242,7 @@ jobs:
       # intentionally no target specifier; see https://github.com/jonhoo/rust-ci-conf/pull/4
       # --feature-powerset runs for every combination of features
       - name: cargo manual hack
-        run: cargo check -F ${{ matrix.feature }}
+        run: cargo check -F ${{ matrix.feature }} --locked
 
   deny:
     # cargo-deny checks licenses, advisories, sources, and bans for
@@ -271,7 +271,7 @@ jobs:
           log-level: warn
           manifest-path: ./Cargo.toml
           command: check
-          arguments: --all-features
+          arguments: --all-features --locked
 
   msrv:
     # check that we can build using the minimal rust version that is specified by this crate
@@ -311,8 +311,8 @@ jobs:
 
       - name: cargo +${{ matrix.msrv }} check
         run: |
-          cargo check -F mimxrt685s,rt,defmt,time,time-driver,unstable-pac
-          cargo check -F mimxrt633s,rt,defmt,time,time-driver,unstable-pac
+          cargo check -F mimxrt685s,rt,defmt,time,time-driver,unstable-pac --locked
+          cargo check -F mimxrt633s,rt,defmt,time,time-driver,unstable-pac --locked
   
   vet:
     # cargo-vet checks for unvetted dependencies in the Cargo.lock file
