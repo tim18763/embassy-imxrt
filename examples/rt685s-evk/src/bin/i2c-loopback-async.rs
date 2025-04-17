@@ -5,7 +5,7 @@ extern crate embassy_imxrt_examples;
 
 use defmt::info;
 use embassy_executor::Spawner;
-use embassy_imxrt::i2c::master::{I2cMaster, Speed};
+use embassy_imxrt::i2c::master::{DutyCycle, I2cMaster};
 use embassy_imxrt::i2c::slave::{Address, Command, I2cSlave, Response};
 use embassy_imxrt::i2c::{self, Async};
 use embassy_imxrt::{bind_interrupts, peripherals};
@@ -108,7 +108,11 @@ async fn main(spawner: Spawner) {
 
     let slave = I2cSlave::new_async(p.FLEXCOMM2, p.PIO0_18, p.PIO0_17, Irqs, SLAVE_ADDR.unwrap(), p.DMA0_CH4).unwrap();
 
-    let master = I2cMaster::new_async(p.FLEXCOMM4, p.PIO0_29, p.PIO0_30, Irqs, Speed::Standard, p.DMA0_CH9).unwrap();
+    let config = i2c::master::Config {
+        speed: i2c::master::Speed::Fast,
+        duty_cycle: DutyCycle::new(50).unwrap(),
+    };
+    let master = I2cMaster::new_async(p.FLEXCOMM4, p.PIO0_29, p.PIO0_30, Irqs, config, p.DMA0_CH9).unwrap();
 
     spawner.must_spawn(master_service(master));
     spawner.must_spawn(slave_service(slave));
