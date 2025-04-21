@@ -382,7 +382,7 @@ impl<'r> RtcDatetime<'r> {
         // Calculate days from January to the current month
         let days_in_month = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30];
         while month > 1 {
-            days += days_in_month[month as usize];
+            days += days_in_month[month as usize - 1];
             if month == 2 && self.is_leap_year(datetime.year) {
                 days += 1;
             }
