@@ -405,7 +405,7 @@ impl<'r> RtcDatetime<'r> {
 
         let mut year = 1970;
         let mut month = 1;
-        let mut day = 0;
+        let mut day = 1;
 
         // Calculate year
         while days >= 365 {
@@ -470,6 +470,15 @@ impl<'r> RtcDatetime<'r> {
         Ok(())
     }
 
+    ///Set the datetime in seconds
+    pub fn set_datetime_in_secs(&self, secs: u32) -> Result<(), Error> {
+        let r = rtc();
+        r.ctrl().modify(|_r, w| w.rtc_en().disable());
+        r.count().write(|w| unsafe { w.bits(secs) });
+        r.ctrl().modify(|_r, w| w.rtc_en().enable());
+        Ok(())
+    }
+
     /// Get the datetime.
     pub fn get_datetime(&self) -> (Datetime, Result<(), Error>) {
         let r = rtc();
@@ -491,6 +500,25 @@ impl<'r> RtcDatetime<'r> {
         {
             (datetime, res)
         }
+    }
+
+    /// Get the datetime as UTC seconds
+    pub fn get_datetime_as_secs(&self) -> Result<u32, Error> {
+        let r = rtc();
+        let secs;
+        //  If RTC is not enabled return error
+        if r.ctrl().read().rtc_en().bit_is_clear() {
+            return Err(Error::RTCNotEnabled);
+        }
+        loop {
+            let secs1 = r.count().read().bits();
+            let secs2 = r.count().read().bits();
+            if secs1 == secs2 {
+                secs = secs1;
+                break;
+            }
+        }
+        Ok(secs)
     }
 }
 
