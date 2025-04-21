@@ -457,49 +457,45 @@ impl<'r> RtcDatetime<'r> {
 
     /// Set the datetime.
     pub fn set_datetime(&self, datetime: &Datetime) -> Result<(), Error> {
-        let r = rtc();
         // SAFETY: Clear RTC_EN bit before setting time to handle race condition
         //         when the count is in middle of a transition
         //         There is 21 mS inacurracy in the time set
         //         Todo: https://github.com/OpenDevicePartnership/embassy-imxrt/issues/121
-        r.ctrl().modify(|_r, w| w.rtc_en().disable());
         self.is_valid_datetime(datetime)?;
         let secs = self.convert_datetime_to_secs(datetime);
-        r.count().write(|w| unsafe { w.bits(secs) });
-        r.ctrl().modify(|_r, w| w.rtc_en().enable());
+        _ = self.set_datetime_in_secs(secs);
         Ok(())
     }
 
     ///Set the datetime in seconds
-    pub fn set_datetime_in_secs(&self, secs: u32) -> Result<(), Error> {
+    pub fn set_datetime_in_secs(&self, secs: u32) {
         let r = rtc();
         r.ctrl().modify(|_r, w| w.rtc_en().disable());
         r.count().write(|w| unsafe { w.bits(secs) });
         r.ctrl().modify(|_r, w| w.rtc_en().enable());
-        Ok(())
     }
 
     /// Get the datetime.
-    pub fn get_datetime(&self) -> (Datetime, Result<(), Error>) {
-        let r = rtc();
-        //  If RTC is not enabled return error
-        if r.ctrl().read().rtc_en().bit_is_clear() {
-            return (Datetime::default(), Err(Error::RTCNotEnabled));
-        }
-        let secs: u32;
-        loop {
-            let secs1 = r.count().read().bits();
-            let secs2 = r.count().read().bits();
-            if secs1 == secs2 {
-                secs = secs1;
-                break;
+    pub fn get_datetime(&self) -> Result<Datetime, Error> {
+        let datetime;
+        let res;
+        match self.get_datetime_as_secs() {
+            Ok(secs) => {
+                datetime = self.convert_secs_to_datetime(secs);
+                match self.is_valid_datetime(&datetime) {
+                    Ok(()) => {
+                        res = Ok(datetime);
+                    }
+                    Err(e) => {
+                        res = Err(e);
+                    }
+                }
+            }
+            Err(e) => {
+                res = Err(e);
             }
         }
-        let datetime = self.convert_secs_to_datetime(secs);
-        let res = self.is_valid_datetime(&datetime);
-        {
-            (datetime, res)
-        }
+        res
     }
 
     /// Get the datetime as UTC seconds
