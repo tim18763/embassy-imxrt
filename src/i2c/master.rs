@@ -92,9 +92,7 @@ impl<'a, M: Mode> I2cMaster<'a, M> {
             // SAFETY: only unsafe due to .bits usage
             unsafe { w.mstsclhigh().bits(0).mstscllow().bits(1) });
 
-        regs.intenset().write(|w|
-                // SAFETY: only unsafe due to .bits usage
-                unsafe { w.bits(0) });
+        regs.intenset().reset();
 
         regs.cfg().write(|w| w.msten().set_bit());
 
