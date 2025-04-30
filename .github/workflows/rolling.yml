@@ -38,7 +38,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        msrv: ["1.83"] # We're relying on namespaced-features, which
+        msrv: ["1.85"] # We're relying on namespaced-features, which
                        # was released in 1.60
                        #
                        # We also depend on `fixed' which requires rust
@@ -51,6 +51,9 @@ jobs:
                        # collapse_debuginfo
                        #
                        # embassy upstream switched to rust 1.83
+                       #
+                       # embedded-services (storage bus) dependency
+                       # requires 1.85
     name: ubuntu / ${{ matrix.msrv }} (${{ matrix.commit }})
     steps:
       - uses: actions/checkout@v4
