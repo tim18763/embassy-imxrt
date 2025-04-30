@@ -276,7 +276,7 @@ pub struct RtcDatetime<'r> {
     _p: Peri<'r, peripherals::RTC>,
 }
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 /// Represents the result of a datetime validation.
 pub enum Error {
     /// The year is invalid.
