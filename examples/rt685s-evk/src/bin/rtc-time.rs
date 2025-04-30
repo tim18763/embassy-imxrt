@@ -32,7 +32,7 @@ async fn main(_spawner: Spawner) {
     Timer::after_millis(20000).await;
 
     // get the datetime set and compare
-    let (time, result) = r.get_datetime();
+    let result = r.get_datetime();
     assert!(result.is_ok());
-    info!("RTC get time: {:?}", time);
+    info!("RTC get time: {:?}", result.unwrap());
 }
