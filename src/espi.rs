@@ -840,6 +840,9 @@ impl<'d> Espi<'d> {
     /// If the event occurs while Host is in S0, an SCI is generated
     /// instead.
     ///
+    /// wake(true) sets WAKE# signal low to generate WAKE event
+    /// wake(false) must be sent to clear WAKE signal does not auto clear
+    ///
     /// Active Low.
     ///
     /// Warning: Blocks until DONE bit clears
@@ -850,6 +853,9 @@ impl<'d> Espi<'d> {
 
     /// Generate PME# event to wake the Host from Sx through PCI PME#.
     ///
+    /// pme(true) sets PME# signal low to generate PME event
+    /// pme(false) must be sent to clear WAKE signal does not auto clear
+    ///
     /// Active Low.
     ///
     /// Warning: Blocks until DONE bit clears
@@ -858,8 +864,11 @@ impl<'d> Espi<'d> {
         self.block_for_vwire_done();
     }
 
-    /// Generate SCI event resulting in ACPI method being invoked by
+    /// Generate SCI# event resulting in ACPI method being invoked by
     /// the OS.
+    ///
+    /// sci(true) generates SCI# event to host
+    /// sci(false) must be called after SCI has been handled
     ///
     /// Active Low.
     ///
@@ -869,8 +878,11 @@ impl<'d> Espi<'d> {
         self.block_for_vwire_done();
     }
 
-    /// Generate SMI event resulting in SMI code being invoked by the
+    /// Generate SMI# event resulting in SMI code being invoked by the
     /// BIOS.
+    ///
+    /// smi(true) sets SMI# signal to indicate system management interrupt
+    /// smi(false) must be called after SMI event has been handled
     ///
     /// Active Low.
     ///
@@ -880,7 +892,11 @@ impl<'d> Espi<'d> {
         self.block_for_vwire_done();
     }
 
-    /// Generate RCIN event.
+    /// Generate RCIN# event.
+    ///
+    /// rcin(true) sets RCIN# on host to request CPU reset
+    /// rcin(false) removes the request for CPU reset. Normally CPU and
+    /// EC will reset and it is not necessary to set false.
     ///
     /// Active Low.
     ///
