@@ -843,8 +843,8 @@ impl<'d> Espi<'d> {
     /// Active Low.
     ///
     /// Warning: Blocks until DONE bit clears
-    pub fn wake(&mut self) {
-        self.info.regs.wirewo().write(|w| w.waken_scin().clear_bit());
+    pub fn wake(&mut self, set: bool) {
+        self.info.regs.wirewo().write(|w| w.waken_scin().variant(!set));
         self.block_for_vwire_done();
     }
 
@@ -853,8 +853,8 @@ impl<'d> Espi<'d> {
     /// Active Low.
     ///
     /// Warning: Blocks until DONE bit clears
-    pub fn pme(&mut self) {
-        self.info.regs.wirewo().write(|w| w.pmen().clear_bit());
+    pub fn pme(&mut self, set: bool) {
+        self.info.regs.wirewo().write(|w| w.pmen().variant(!set));
         self.block_for_vwire_done();
     }
 
@@ -864,8 +864,8 @@ impl<'d> Espi<'d> {
     /// Active Low.
     ///
     /// Warning: Blocks until DONE bit clears
-    pub fn sci(&mut self) {
-        self.info.regs.wirewo().write(|w| w.scin().clear_bit());
+    pub fn sci(&mut self, set: bool) {
+        self.info.regs.wirewo().write(|w| w.scin().variant(!set));
         self.block_for_vwire_done();
     }
 
@@ -875,8 +875,8 @@ impl<'d> Espi<'d> {
     /// Active Low.
     ///
     /// Warning: Blocks until DONE bit clears
-    pub fn smi(&mut self) {
-        self.info.regs.wirewo().write(|w| w.smin().clear_bit());
+    pub fn smi(&mut self, set: bool) {
+        self.info.regs.wirewo().write(|w| w.smin().variant(!set));
         self.block_for_vwire_done();
     }
 
@@ -885,8 +885,8 @@ impl<'d> Espi<'d> {
     /// Active Low.
     ///
     /// Warning: Blocks until DONE bit clears
-    pub fn rcin(&mut self) {
-        self.info.regs.wirewo().write(|w| w.rcinn().clear_bit());
+    pub fn rcin(&mut self, set: bool) {
+        self.info.regs.wirewo().write(|w| w.rcinn().variant(!set));
         self.block_for_vwire_done();
     }
 
@@ -1023,19 +1023,15 @@ impl Espi<'_> {
     }
 
     fn mailbox(&mut self, port: usize, port_type: Type, direction: Direction, addr: u16, offset: u16, length: Len) {
-        // Set port type
-        self.info
-            .regs
-            .port(port)
-            .cfg()
-            .modify(|_, w| w.type_().variant(port_type));
-
-        // Set port direction
-        self.info
-            .regs
-            .port(port)
-            .cfg()
-            .modify(|_, w| w.direction().variant(direction));
+        // Set port type,direction and interrupt configuration
+        self.info.regs.port(port).cfg().write(|w| {
+            w.type_()
+                .variant(port_type)
+                .direction()
+                .variant(direction)
+                .mbint_all()
+                .set_bit()
+        });
 
         // Set port interrupt rules
         self.info.regs.port(port).irulestat().write(|w| {
