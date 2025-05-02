@@ -6,6 +6,7 @@ use core::task::Poll;
 
 use embassy_futures::select::{select, Either};
 use embassy_hal_internal::drop::OnDrop;
+use itertools::Itertools;
 
 use super::{
     force_clear_remediation, wait_remediation_complete, Async, Blocking, Error, Info, Instance, InterruptHandler,
@@ -14,9 +15,11 @@ use super::{
 };
 use crate::flexcomm::FlexcommRef;
 use crate::interrupt::typelevel::Interrupt;
+use crate::pac::i2c0::msttime::{Mstsclhigh, Mstscllow};
 use crate::{dma, interrupt, Peri};
 
 /// Bus speed (nominal SCL, no clock stretching)
+#[derive(Clone, Copy)]
 pub enum Speed {
     /// 100 kbit/s
     Standard,
@@ -31,6 +34,119 @@ pub enum Speed {
     High,
 }
 
+/// Divide integers rounding to the nearest whole number rather than always down
+fn rounded_divide(numerator: u32, denominator: u32) -> u32 {
+    (numerator + denominator / 2) / denominator
+}
+
+fn get_duty_cycle(hi_clocks: u8, lo_clocks: u8) -> u8 {
+    let total_clocks = u16::from(hi_clocks + lo_clocks);
+    (100 * u16::from(hi_clocks) / total_clocks) as u8
+}
+
+fn get_freq_hz(hi_clocks: u8, lo_clocks: u8, clock_div_multiplier: u16, clock_speed_hz: u32) -> u32 {
+    clock_speed_hz / (u32::from(hi_clocks + lo_clocks) * u32::from(clock_div_multiplier))
+}
+
+// We need to be able to convert back to the clocks representation, but can't implement From/Into because
+// neither the type nor the trait are defined in our crate.  Therefore, we define this Into-like trait and
+// use that instead.
+//
+trait IntoClocksEnum<DestT> {
+    fn into_clocks_enum(&self) -> DestT;
+}
+
+const MIN_CLOCKS: u8 = 2;
+const MAX_CLOCKS: u8 = 9;
+
+impl IntoClocksEnum<Mstscllow> for u8 {
+    fn into_clocks_enum(&self) -> Mstscllow {
+        match *self {
+            2 => Mstscllow::Clocks2,
+            3 => Mstscllow::Clocks3,
+            4 => Mstscllow::Clocks4,
+            5 => Mstscllow::Clocks5,
+            6 => Mstscllow::Clocks6,
+            7 => Mstscllow::Clocks7,
+            8 => Mstscllow::Clocks8,
+            9 => Mstscllow::Clocks9,
+            _ => panic!("Invalid value for Mstscllow"),
+        }
+    }
+}
+
+impl IntoClocksEnum<Mstsclhigh> for u8 {
+    fn into_clocks_enum(&self) -> Mstsclhigh {
+        match *self {
+            2 => Mstsclhigh::Clocks2,
+            3 => Mstsclhigh::Clocks3,
+            4 => Mstsclhigh::Clocks4,
+            5 => Mstsclhigh::Clocks5,
+            6 => Mstsclhigh::Clocks6,
+            7 => Mstsclhigh::Clocks7,
+            8 => Mstsclhigh::Clocks8,
+            9 => Mstsclhigh::Clocks9,
+            _ => panic!("Invalid value for Mstsclhigh"),
+        }
+    }
+}
+
+struct SpeedRegisterSettings {
+    scl_high_clocks: Mstsclhigh,
+    scl_low_clocks: Mstscllow,
+    clock_div_multiplier: u16,
+
+    _actual_freq_hz: u32,
+}
+
+impl SpeedRegisterSettings {
+    fn new(duty_cycle: DutyCycle, speed: Speed) -> Result<Self> {
+        const SFRO_CLOCK_SPEED_HZ: u32 = 16_000_000;
+
+        let target_freq_hz: u32 = match speed {
+            Speed::Standard => 100_000,   // 100 KHz
+            Speed::Fast => 400_000,       // 400 KHz
+            Speed::FastPlus => 1_000_000, // 1 MHz
+
+            _ => return Err(Error::UnsupportedConfiguration),
+        };
+
+        // Figure out what we need to set the clock divider to in order to hit the I2C speed the user requested.  Again, we may not
+        // be able to be exact, so we need to find the closest viable option.
+        //
+        let (result_clocks_hi, result_clocks_lo, result_div_multiplier) = (MIN_CLOCKS..=MAX_CLOCKS)
+            .cartesian_product(MIN_CLOCKS..=MAX_CLOCKS)
+            .filter(|(hi_clocks, lo_clocks)| get_duty_cycle(*hi_clocks, *lo_clocks) == duty_cycle.value)
+            .map(|(hi_clocks, lo_clocks)| {
+                // As speeds increase, clock_div_multiplier will approach 1, so rounding to the nearest whole number (rather than always down
+                // as normal integer division does) can meaningfully reduce error in the actual speed in cases where the remainder is high.
+                let clock_div_multiplier =
+                    rounded_divide(SFRO_CLOCK_SPEED_HZ, target_freq_hz * u32::from(hi_clocks + lo_clocks)) as u16;
+                (hi_clocks, lo_clocks, clock_div_multiplier)
+            })
+            .min_by(|a, b| {
+                let (hi_a, lo_a, div_a) = a;
+                let (hi_b, lo_b, div_b) = b;
+                let freq_a = get_freq_hz(*hi_a, *lo_a, *div_a, SFRO_CLOCK_SPEED_HZ);
+                let freq_b = get_freq_hz(*hi_b, *lo_b, *div_b, SFRO_CLOCK_SPEED_HZ);
+
+                target_freq_hz.abs_diff(freq_a).cmp(&target_freq_hz.abs_diff(freq_b))
+            })
+            .ok_or(Error::UnsupportedConfiguration)?;
+
+        // A clock divider of 1 means 'divide clocks by 2', not 'divide clocks by 1', so we need to account for that.
+        //
+        const CLOCK_DIV_MULTIPLIER_OFFSET: u16 = 1;
+        Ok(Self {
+            scl_high_clocks: result_clocks_hi.into_clocks_enum(),
+            scl_low_clocks: result_clocks_lo.into_clocks_enum(),
+            clock_div_multiplier: result_div_multiplier - CLOCK_DIV_MULTIPLIER_OFFSET,
+            _actual_freq_hz: SFRO_CLOCK_SPEED_HZ
+                / (u32::from(result_clocks_hi + result_clocks_lo) * u32::from(result_div_multiplier)),
+        })
+    }
+}
+
 /// use `FCn` as I2C Master controller
 pub struct I2cMaster<'a, M: Mode> {
     info: Info,
@@ -39,13 +155,78 @@ pub struct I2cMaster<'a, M: Mode> {
     dma_ch: Option<dma::channel::Channel<'a>>,
 }
 
+/// Represents a duty cycle (percentage of time to hold the SCL line high per bit).  Fitting is best-effort / not exact.
+#[derive(Clone, Copy)]
+pub struct DutyCycle {
+    value: u8,
+}
+
+impl DutyCycle {
+    /// Determines and represents the closest possible duty cycle to the requested duty cycle that the hardware can support.
+    pub fn new(target_duty_cycle: u8) -> Result<Self> {
+        if target_duty_cycle < 100 * MIN_CLOCKS / (MIN_CLOCKS + MAX_CLOCKS)
+            || target_duty_cycle > (100 * MAX_CLOCKS as u16 / (MIN_CLOCKS + MAX_CLOCKS) as u16 + 1) as u8
+        {
+            Err(Error::UnsupportedConfiguration)
+        } else {
+            // The hardware only has 6 bits of configurability for duty cycle and some of those represent duplicate duty cycles,
+            // so we may not be able to accommodate the exact duty cycle the user has requested.  We need to find the closest
+            // viable option.
+            //
+            let closest_supported_duty_cycle = (MIN_CLOCKS..=MAX_CLOCKS)
+                .cartesian_product(MIN_CLOCKS..=MAX_CLOCKS)
+                .map(|(hi_clocks, lo_clocks)| get_duty_cycle(hi_clocks, lo_clocks))
+                .min_by(|duty_cycle_a, duty_cycle_b| {
+                    duty_cycle_a
+                        .abs_diff(target_duty_cycle)
+                        .cmp(&duty_cycle_b.abs_diff(target_duty_cycle))
+                })
+                .ok_or(Error::UnsupportedConfiguration)?;
+
+            Ok(Self {
+                value: closest_supported_duty_cycle,
+            })
+        }
+    }
+
+    /// Retreives the actual selected duty cycle, which may be slightly different from the requested duty cycle due to hardware limitations.
+    pub fn actual_value(&self) -> u8 {
+        self.value
+    }
+}
+
+impl Default for DutyCycle {
+    fn default() -> Self {
+        DutyCycle::new(40).unwrap()
+    }
+}
+
+/// Configuration for I2C Master
+#[derive(Clone, Copy)]
+pub struct Config {
+    /// Bus speed (nominal SCL, no clock stretching)
+    pub speed: Speed,
+
+    /// The target duty cycle (percentage of time to hold the SCL line high per bit).
+    pub duty_cycle: DutyCycle,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            speed: Speed::Standard,
+            duty_cycle: Default::default(),
+        }
+    }
+}
+
 impl<'a, M: Mode> I2cMaster<'a, M> {
     fn new_inner<T: Instance>(
         _bus: Peri<'a, T>,
         scl: Peri<'a, impl SclPin<T>>,
         sda: Peri<'a, impl SdaPin<T>>,
         // TODO - integrate clock APIs to allow dynamic freq selection | clock: crate::flexcomm::Clock,
-        speed: Speed,
+        config: Config,
         dma_ch: Option<dma::channel::Channel<'a>>,
     ) -> Result<Self> {
         // TODO - clock integration
@@ -59,42 +240,21 @@ impl<'a, M: Mode> I2cMaster<'a, M> {
         let info = T::info();
         let regs = info.regs;
 
-        // this check should be redundant with T::set_mode()? above
+        let speed_settings = SpeedRegisterSettings::new(config.duty_cycle, config.speed)?;
 
-        // rates taken assuming SFRO:
-        //
-        //  7 => 403.3 kHz
-        //  9 => 322.6 kHz
-        // 12 => 247.8 kHz
-        // 16 => 198.2 kHz
-        // 18 => 166.6 Khz
-        // 22 => 142.6 kHz
-        // 30 => 100.0 kHz
-        match speed {
-            // 100 kHz
-            Speed::Standard => {
-                regs.clkdiv().write(|w|
-                // SAFETY: only unsafe due to .bits usage
-                unsafe { w.divval().bits(30) });
-            }
+        regs.msttime().write(|w| {
+            w.mstsclhigh()
+                .variant(speed_settings.scl_high_clocks)
+                .mstscllow()
+                .variant(speed_settings.scl_low_clocks)
+        });
 
-            // 400 kHz
-            Speed::Fast => {
-                regs.clkdiv().write(|w|
-                // SAFETY: only unsafe due to .bits usage
-                unsafe { w.divval().bits(7) });
-            }
+        regs.clkdiv().write(|w| {
+            // SAFETY: only unsafe due to .bits usage.
+            unsafe { w.divval().bits(speed_settings.clock_div_multiplier) }
+        });
 
-            _ => return Err(Error::UnsupportedConfiguration),
-        }
-
-        regs.msttime().write(|w|
-            // SAFETY: only unsafe due to .bits usage
-            unsafe { w.mstsclhigh().bits(0).mstscllow().bits(1) });
-
-        regs.intenset().write(|w|
-                // SAFETY: only unsafe due to .bits usage
-                unsafe { w.bits(0) });
+        regs.intenset().reset();
 
         regs.cfg().write(|w| w.msten().set_bit());
 
@@ -126,10 +286,10 @@ impl<'a> I2cMaster<'a, Blocking> {
         scl: Peri<'a, impl SclPin<T>>,
         sda: Peri<'a, impl SdaPin<T>>,
         // TODO - integrate clock APIs to allow dynamic freq selection | clock: crate::flexcomm::Clock,
-        speed: Speed,
+        config: Config,
     ) -> Result<Self> {
         force_clear_remediation(&T::info());
-        Ok(Self::new_inner::<T>(fc, scl, sda, speed, None)?)
+        Ok(Self::new_inner::<T>(fc, scl, sda, config, None)?)
     }
 
     fn start(&mut self, address: u16, is_read: bool) -> Result<()> {
@@ -321,12 +481,12 @@ impl<'a> I2cMaster<'a, Async> {
         sda: Peri<'a, impl SdaPin<T>>,
         _irq: impl interrupt::typelevel::Binding<T::Interrupt, InterruptHandler<T>> + 'a,
         // TODO - integrate clock APIs to allow dynamic freq selection | clock: crate::flexcomm::Clock,
-        speed: Speed,
+        config: Config,
         dma_ch: Peri<'a, impl MasterDma<T>>,
     ) -> Result<Self> {
         force_clear_remediation(&T::info());
         let ch = dma::Dma::reserve_channel(dma_ch);
-        let this = Self::new_inner::<T>(fc, scl, sda, speed, ch)?;
+        let this = Self::new_inner::<T>(fc, scl, sda, config, ch)?;
 
         T::Interrupt::unpend();
         unsafe { T::Interrupt::enable() };
