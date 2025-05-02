@@ -840,53 +840,69 @@ impl<'d> Espi<'d> {
     /// If the event occurs while Host is in S0, an SCI is generated
     /// instead.
     ///
+    /// wake(true) sets WAKE# signal low to generate WAKE event
+    /// wake(false) must be sent to clear WAKE signal does not auto clear
+    ///
     /// Active Low.
     ///
     /// Warning: Blocks until DONE bit clears
-    pub fn wake(&mut self) {
-        self.info.regs.wirewo().write(|w| w.waken_scin().clear_bit());
+    pub fn wake(&mut self, set: bool) {
+        self.info.regs.wirewo().write(|w| w.waken_scin().variant(!set));
         self.block_for_vwire_done();
     }
 
     /// Generate PME# event to wake the Host from Sx through PCI PME#.
     ///
+    /// pme(true) sets PME# signal low to generate PME event
+    /// pme(false) must be sent to clear WAKE signal does not auto clear
+    ///
     /// Active Low.
     ///
     /// Warning: Blocks until DONE bit clears
-    pub fn pme(&mut self) {
-        self.info.regs.wirewo().write(|w| w.pmen().clear_bit());
+    pub fn pme(&mut self, set: bool) {
+        self.info.regs.wirewo().write(|w| w.pmen().variant(!set));
         self.block_for_vwire_done();
     }
 
-    /// Generate SCI event resulting in ACPI method being invoked by
+    /// Generate SCI# event resulting in ACPI method being invoked by
     /// the OS.
     ///
+    /// sci(true) generates SCI# event to host
+    /// sci(false) must be called after SCI has been handled
+    ///
     /// Active Low.
     ///
     /// Warning: Blocks until DONE bit clears
-    pub fn sci(&mut self) {
-        self.info.regs.wirewo().write(|w| w.scin().clear_bit());
+    pub fn sci(&mut self, set: bool) {
+        self.info.regs.wirewo().write(|w| w.scin().variant(!set));
         self.block_for_vwire_done();
     }
 
-    /// Generate SMI event resulting in SMI code being invoked by the
+    /// Generate SMI# event resulting in SMI code being invoked by the
     /// BIOS.
     ///
+    /// smi(true) sets SMI# signal to indicate system management interrupt
+    /// smi(false) must be called after SMI event has been handled
+    ///
     /// Active Low.
     ///
     /// Warning: Blocks until DONE bit clears
-    pub fn smi(&mut self) {
-        self.info.regs.wirewo().write(|w| w.smin().clear_bit());
+    pub fn smi(&mut self, set: bool) {
+        self.info.regs.wirewo().write(|w| w.smin().variant(!set));
         self.block_for_vwire_done();
     }
 
-    /// Generate RCIN event.
+    /// Generate RCIN# event.
+    ///
+    /// rcin(true) sets RCIN# on host to request CPU reset
+    /// rcin(false) removes the request for CPU reset. Normally CPU and
+    /// EC will reset and it is not necessary to set false.
     ///
     /// Active Low.
     ///
     /// Warning: Blocks until DONE bit clears
-    pub fn rcin(&mut self) {
-        self.info.regs.wirewo().write(|w| w.rcinn().clear_bit());
+    pub fn rcin(&mut self, set: bool) {
+        self.info.regs.wirewo().write(|w| w.rcinn().variant(!set));
         self.block_for_vwire_done();
     }
 
@@ -1023,19 +1039,15 @@ impl Espi<'_> {
     }
 
     fn mailbox(&mut self, port: usize, port_type: Type, direction: Direction, addr: u16, offset: u16, length: Len) {
-        // Set port type
-        self.info
-            .regs
-            .port(port)
-            .cfg()
-            .modify(|_, w| w.type_().variant(port_type));
-
-        // Set port direction
-        self.info
-            .regs
-            .port(port)
-            .cfg()
-            .modify(|_, w| w.direction().variant(direction));
+        // Set port type,direction and interrupt configuration
+        self.info.regs.port(port).cfg().write(|w| {
+            w.type_()
+                .variant(port_type)
+                .direction()
+                .variant(direction)
+                .mbint_all()
+                .set_bit()
+        });
 
         // Set port interrupt rules
         self.info.regs.port(port).irulestat().write(|w| {
