@@ -35,8 +35,9 @@ pub mod i2c;
 pub mod iopctl;
 pub mod pwm;
 pub mod rng;
+pub mod rtc;
 /// Time driver for the iMX RT600 series.
-#[cfg(feature = "time-driver")]
+#[cfg(feature = "_time-driver")]
 pub mod time_driver;
 /// NXP Timer Driver for handling timer-related functionalities.
 /// Module provides functionality for
@@ -113,7 +114,7 @@ pub mod config {
         /// Clock configuration.
         pub clocks: ClockConfig,
         /// Time driver interrupt priority. Should be lower priority than softdevice if used.
-        #[cfg(feature = "time-driver")]
+        #[cfg(feature = "_time-driver")]
         pub time_interrupt_priority: crate::interrupt::Priority,
     }
 
@@ -121,7 +122,7 @@ pub mod config {
         fn default() -> Self {
             Self {
                 clocks: ClockConfig::crystal(),
-                #[cfg(feature = "time-driver")]
+                #[cfg(feature = "_time-driver")]
                 time_interrupt_priority: crate::interrupt::Priority::P0,
             }
         }
@@ -132,7 +133,7 @@ pub mod config {
         pub fn new(clocks: ClockConfig) -> Self {
             Self {
                 clocks,
-                #[cfg(feature = "time-driver")]
+                #[cfg(feature = "_time-driver")]
                 time_interrupt_priority: crate::interrupt::Priority::P0,
             }
         }
@@ -154,9 +155,9 @@ pub fn init(config: config::Config) -> Peripherals {
             error!("unable to initialize Clocks for reason: {:?}", e);
             // Panic here?
         }
-        flash::init();
-        #[cfg(feature = "time-driver")]
+        #[cfg(feature = "_time-driver")]
         time_driver::init(config.time_interrupt_priority);
+        flash::init();
         dma::init();
         gpio::init();
         timer::init();
